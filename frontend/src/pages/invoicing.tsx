@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -6,6 +6,7 @@ import { api } from '@/services/api'
 import { formatCurrency } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import { FileText, RefreshCw, AlertCircle, CheckCircle2, Clock, XCircle, Send, Loader2 } from 'lucide-react'
+import { Modal } from '@/components/ui/modal'
 
 interface ECFDoc {
   id: string
@@ -37,6 +38,11 @@ export function InvoicingPage() {
   const [documents, setDocuments] = useState<ECFDoc[]>([])
   const [loading, setLoading] = useState(true)
   const [retrying, setRetrying] = useState<string | null>(null)
+  
+  const [annulModalOpen, setAnnulModalOpen] = useState(false)
+  const [selectedDoc, setSelectedDoc] = useState<ECFDoc | null>(null)
+  const [annulReason, setAnnulReason] = useState('1')
+  const [annulling, setAnnulling] = useState(false)
 
   const fetchDocs = async () => {
     setLoading(true)
@@ -54,6 +60,31 @@ export function InvoicingPage() {
     await api(`/billing/ecf-documents/${id}/retry/`, { method: 'POST' })
     await fetchDocs()
     setRetrying(null)
+  }
+
+  const handleAnnul = async () => {
+    if (!selectedDoc) return
+    setAnnulling(true)
+    try {
+      await api(`/billing/payments/${selectedDoc.payment}/generate_ecf/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ncf_type: 'B04',
+          rnc_cliente: selectedDoc.rnc_cliente,
+          razon_social_cliente: selectedDoc.razon_social_cliente,
+        }),
+      })
+      setAnnulModalOpen(false)
+      setSelectedDoc(null)
+      await fetchDocs()
+    } catch (err: any) {
+      alert(err.message || 'Error al generar la Nota de Crédito')
+    }
+    setAnnulling(false)
+  }
+
+  const hasCreditNote = (paymentId: string) => {
+    return documents.some((d) => d.payment === paymentId && d.ncf_type === 'B04')
   }
 
   const stats = {
@@ -128,14 +159,25 @@ export function InvoicingPage() {
                         <td className="p-3 text-muted-foreground">{doc.attempts}</td>
                         <td className="p-3 text-xs text-destructive max-w-[200px] truncate">{doc.last_error || '—'}</td>
                         <td className="p-3 text-right">
-                          {(doc.status === 'failed' || doc.status === 'rejected') && (
-                            <Button variant="outline" size="sm" className="text-xs"
-                              onClick={() => handleRetry(doc.id)}
-                              disabled={retrying === doc.id}>
-                              {retrying === doc.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                              Reintentar
-                            </Button>
-                          )}
+                          <div className="flex items-center justify-end gap-2">
+                            {(doc.status === 'failed' || doc.status === 'rejected') && (
+                              <Button variant="outline" size="sm" className="text-xs"
+                                onClick={() => handleRetry(doc.id)}
+                                disabled={retrying === doc.id}>
+                                {retrying === doc.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                                Reintentar
+                              </Button>
+                            )}
+                            {doc.ncf_type === 'B01' && doc.status === 'accepted' && !hasCreditNote(doc.payment) && (
+                              <Button variant="outline" size="sm" className="text-xs text-destructive hover:bg-destructive/10 border-destructive/20"
+                                onClick={() => {
+                                  setSelectedDoc(doc)
+                                  setAnnulModalOpen(true)
+                                }}>
+                                Anular
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )
@@ -146,6 +188,36 @@ export function InvoicingPage() {
           )}
         </CardContent>
       </Card>
+
+      <Modal open={annulModalOpen} onClose={() => setAnnulModalOpen(false)} title="Anular Factura (Nota de Crédito)">
+        <div className="space-y-4 pt-4">
+          <p className="text-sm text-muted-foreground font-sans">
+            Se generará una Nota de Crédito Electrónica (B04) asociada al NCF <span className="font-mono font-semibold">{selectedDoc?.ncf}</span>.
+            Esta acción anulará la venta en los registros contables y liberará la mesa asociada.
+          </p>
+          
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground font-sans">Motivo de Anulación</label>
+            <select value={annulReason} onChange={(e) => setAnnulReason(e.target.value)}
+              className="w-full bg-input border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-sans">
+              <option value="1">01 - Anulación de Factura</option>
+              <option value="2">02 - Corrección de Errores</option>
+              <option value="3">03 - Descuento / Bonificación</option>
+              <option value="4">04 - Devolución de Bienes</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 justify-end pt-4">
+            <Button variant="outline" onClick={() => setAnnulModalOpen(false)} disabled={annulling}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleAnnul} disabled={annulling} className="gap-2">
+              {annulling && <Loader2 className="w-4 h-4 animate-spin" />}
+              Confirmar Anulación
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </motion.div>
   )
 }

@@ -26,6 +26,8 @@ export interface MenuItem {
   category: number
   category_name: string
   price: number
+  price_today?: number | null
+  effective_price?: number | null
   itbis_type: 'gravado' | 'exento' | 'reducido'
   preparation_time: number
   is_available: boolean

@@ -1,6 +1,6 @@
 from rest_framework import viewsets, permissions
-from .models import InventoryItem, PurchaseOrder
-from .serializers import InventoryItemSerializer, PurchaseOrderSerializer
+from .models import InventoryItem, PurchaseOrder, MenuItemRecipe
+from .serializers import InventoryItemSerializer, PurchaseOrderSerializer, MenuItemRecipeSerializer
 
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
@@ -16,3 +16,10 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     serializer_class = PurchaseOrderSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['status']
+
+
+class MenuItemRecipeViewSet(viewsets.ModelViewSet):
+    queryset = MenuItemRecipe.objects.all()
+    serializer_class = MenuItemRecipeSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['menu_item']

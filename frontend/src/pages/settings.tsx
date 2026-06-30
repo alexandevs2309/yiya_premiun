@@ -14,7 +14,7 @@ import { Modal } from '@/components/ui/modal'
 import { InputField } from '@/components/ui/input-field'
 import type { User, Table, MenuItem, MenuCategory, UserRole } from '@/types'
 
-type Tab = 'users' | 'menu' | 'tables' | 'ncf' | 'audit' | 'sistema'
+type Tab = 'users' | 'menu' | 'tables' | 'ncf' | 'audit' | 'employees' | 'sistema'
 
 export function SettingsPage() {
   const [tab, setTab] = useState<Tab>('users')
@@ -25,6 +25,7 @@ export function SettingsPage() {
     { id: 'users', label: 'Usuarios', icon: Users },
     { id: 'menu', label: 'Menú', icon: Utensils },
     { id: 'tables', label: 'Mesas', icon: Table2 },
+    { id: 'employees', label: 'Nómina y Asistencia', icon: UserCircle },
     { id: 'ncf', label: 'NCF', icon: FileText },
     { id: 'audit', label: 'Auditoría', icon: History },
     { id: 'sistema', label: 'Sistema', icon: Server },
@@ -59,6 +60,7 @@ export function SettingsPage() {
         {tab === 'users' && <UsersTab />}
         {tab === 'menu' && <MenuTab />}
         {tab === 'tables' && <TablesTab />}
+        {tab === 'employees' && <EmployeesTab />}
         {tab === 'ncf' && <NCFTab />}
         {tab === 'audit' && <AuditTab />}
         {tab === 'sistema' && <SistemaTab />}
@@ -199,7 +201,13 @@ function MenuTab() {
   const [editItem, setEditItem] = useState<MenuItem | null>(null)
   const [creatingItem, setCreatingItem] = useState(false)
   const [newCatName, setNewCatName] = useState('')
-  const [itemForm, setItemForm] = useState({ name: '', price: '', itbis_type: 'gravado', is_available: true, preparation_time: '10', category: '', image_file: null as File | null })
+  const [itemForm, setItemForm] = useState({ name: '', price: '', price_today: '', itbis_type: 'gravado', is_available: true, preparation_time: '10', category: '', image_file: null as File | null })
+
+  // Recetas
+  const [recipeIngredients, setRecipeIngredients] = useState<any[]>([])
+  const [inventoryItems, setInventoryItems] = useState<any[]>([])
+  const [addingIngredientId, setAddingIngredientId] = useState<string>('')
+  const [addingIngredientQty, setAddingIngredientQty] = useState('0')
 
   const fetch = async () => {
     setLoading(true)
@@ -208,7 +216,12 @@ function MenuTab() {
     setLoading(false)
   }
 
-  useEffect(() => { fetch() }, [])
+  useEffect(() => { 
+    fetch() 
+    api('/inventory/items/').then((data: any) => {
+      setInventoryItems(data || [])
+    }).catch(() => {})
+  }, [])
 
   const addCategory = async () => {
     if (!newCatName.trim()) return
@@ -224,20 +237,71 @@ function MenuTab() {
   }
 
   const openCreateItem = (catId: number) => {
-    setItemForm({ name: '', price: '', itbis_type: 'gravado', is_available: true, preparation_time: '10', category: String(catId), image_file: null })
+    setItemForm({ name: '', price: '', price_today: '', itbis_type: 'gravado', is_available: true, preparation_time: '10', category: String(catId), image_file: null })
     setCreatingItem(true)
+    setRecipeIngredients([])
   }
 
-  const openEditItem = (item: MenuItem) => {
+  const openEditItem = async (item: MenuItem) => {
     setItemForm({
-      name: item.name, price: String(item.price), itbis_type: item.itbis_type,
-      is_available: item.is_available, preparation_time: String(item.preparation_time), category: String(item.category), image_file: null,
+      name: item.name,
+      price: String(item.price),
+      price_today: item.price_today ? String(item.price_today) : '',
+      itbis_type: item.itbis_type,
+      is_available: item.is_available,
+      preparation_time: String(item.preparation_time),
+      category: String(item.category),
+      image_file: null,
     })
     setEditItem(item)
+    try {
+      const data: any = await api(`/inventory/recipes/?menu_item=${item.id}`)
+      setRecipeIngredients(data || [])
+    } catch {
+      setRecipeIngredients([])
+    }
+  }
+
+  const addRecipeIngredient = async () => {
+    if (!editItem || !addingIngredientId || parseFloat(addingIngredientQty) <= 0) return
+    try {
+      await api('/inventory/recipes/', {
+        method: 'POST',
+        body: JSON.stringify({
+          menu_item: editItem.id,
+          inventory_item: addingIngredientId,
+          quantity: parseFloat(addingIngredientQty)
+        })
+      })
+      const data: any = await api(`/inventory/recipes/?menu_item=${editItem.id}`)
+      setRecipeIngredients(data || [])
+      setAddingIngredientId('')
+      setAddingIngredientQty('0')
+    } catch (err) {
+      alert('Error al agregar ingrediente a la receta')
+    }
+  }
+
+  const removeRecipeIngredient = async (recipeId: string) => {
+    if (!editItem) return
+    try {
+      await api(`/inventory/recipes/${recipeId}/`, { method: 'DELETE' })
+      setRecipeIngredients(prev => prev.filter(r => r.id !== recipeId))
+    } catch {
+      alert('Error al eliminar ingrediente de la receta')
+    }
   }
 
   const saveItem = async () => {
-    const payload = { name: itemForm.name, price: parseFloat(itemForm.price), itbis_type: itemForm.itbis_type as MenuItem['itbis_type'], is_available: itemForm.is_available, preparation_time: parseInt(itemForm.preparation_time), category: parseInt(itemForm.category) }
+    const payload = {
+      name: itemForm.name,
+      price: parseFloat(itemForm.price),
+      price_today: itemForm.price_today ? parseFloat(itemForm.price_today) : null,
+      itbis_type: itemForm.itbis_type as MenuItem['itbis_type'],
+      is_available: itemForm.is_available,
+      preparation_time: parseInt(itemForm.preparation_time),
+      category: parseInt(itemForm.category)
+    }
     let savedItem: MenuItem
     if (editItem) {
       savedItem = await adminApi.menuItems.update(editItem.id, payload)
@@ -296,9 +360,10 @@ function MenuTab() {
             <CardContent className="p-0">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-muted-foreground text-xs">
+                  <tr className="border-b text-muted-foreground text-xs font-sans">
                     <th className="text-left p-2 font-medium">Item</th>
-                    <th className="text-left p-2 font-medium">Precio</th>
+                    <th className="text-left p-2 font-medium">Precio Base</th>
+                    <th className="text-left p-2 font-medium">Precio Hoy</th>
                     <th className="text-left p-2 font-medium">ITBIS</th>
                     <th className="text-left p-2 font-medium">Disponible</th>
                     <th className="text-right p-2 font-medium">Acción</th>
@@ -309,6 +374,7 @@ function MenuTab() {
                     <tr key={item.id} className="border-b last:border-0 hover:bg-muted/30">
                       <td className="p-2">{item.name}</td>
                       <td className="p-2 font-medium">{formatCurrency(item.price)}</td>
+                      <td className="p-2 font-medium text-dorado-champan-500">{item.price_today ? formatCurrency(item.price_today) : '—'}</td>
                       <td className="p-2"><Badge variant="secondary" className="text-[9px]">{item.itbis_type}</Badge></td>
                       <td className="p-2">
                         <Button variant="ghost" size="sm" onClick={async () => {
@@ -338,7 +404,7 @@ function MenuTab() {
         <div className="space-y-3">
           <InputField label="Nombre" value={itemForm.name} onChange={(v) => setItemForm({ ...itemForm, name: v })} />
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Imagen</label>
+            <label className="text-xs text-muted-foreground mb-1 block font-sans">Imagen</label>
             <label className="flex items-center gap-2 cursor-pointer h-10 rounded-lg bg-secondary/50 border border-border px-3 text-sm text-muted-foreground hover:bg-secondary/80 transition-colors">
               <Plus className="w-4 h-4" />
               {itemForm.image_file ? itemForm.image_file.name : (editItem?.image ? 'Cambiar imagen' : 'Subir imagen')}
@@ -357,12 +423,13 @@ function MenuTab() {
               </div>
             )}
           </div>
-          <InputField label="Precio (RD$)" type="number" value={itemForm.price} onChange={(v) => setItemForm({ ...itemForm, price: v })} />
+          <InputField label="Precio Base (RD$)" type="number" value={itemForm.price} onChange={(v) => setItemForm({ ...itemForm, price: v })} />
+          <InputField label="Precio Hoy (RD$ - Opcional)" type="number" value={itemForm.price_today} onChange={(v) => setItemForm({ ...itemForm, price_today: v })} />
           <InputField label="Tiempo preparación (min)" type="number" value={itemForm.preparation_time} onChange={(v) => setItemForm({ ...itemForm, preparation_time: v })} />
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Tipo ITBIS</label>
+            <label className="text-xs text-muted-foreground mb-1 block font-sans">Tipo ITBIS</label>
             <select value={itemForm.itbis_type} onChange={(e) => setItemForm({ ...itemForm, itbis_type: e.target.value })}
-              className="w-full h-10 rounded-lg bg-secondary/50 border border-border text-sm px-3 focus:outline-none focus:ring-2 focus:ring-ring">
+              className="w-full h-10 rounded-lg bg-secondary/50 border border-border text-sm px-3 focus:outline-none focus:ring-2 focus:ring-ring font-sans">
               <option value="gravado">Gravado 18%</option>
               <option value="exento">Exento</option>
               <option value="reducido">Tasa Reducida</option>
@@ -371,10 +438,45 @@ function MenuTab() {
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Categoría</label>
             <select value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })}
-              className="w-full h-10 rounded-lg bg-secondary/50 border border-border text-sm px-3 focus:outline-none focus:ring-2 focus:ring-ring">
+              className="w-full h-10 rounded-lg bg-secondary/50 border border-border text-sm px-3 focus:outline-none focus:ring-2 focus:ring-ring font-sans">
               {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
+
+          {editItem && (
+            <div className="border-t pt-3 space-y-2 font-sans">
+              <label className="text-xs font-semibold text-muted-foreground block font-sans">Receta (Materia Prima / Ingredientes)</label>
+              
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {recipeIngredients.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">Sin ingredientes asignados.</p>
+                ) : (
+                  recipeIngredients.map((r: any) => (
+                    <div key={r.id} className="flex items-center justify-between p-1.5 bg-secondary/40 rounded border border-border/60 text-xs">
+                      <span>{r.inventory_item_name} ({r.quantity} {r.inventory_item_unit})</span>
+                      <Button variant="ghost" size="sm" className="h-5 px-1.5 text-destructive font-semibold hover:bg-destructive/10" onClick={() => removeRecipeIngredient(r.id)}>
+                        Eliminar
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="flex gap-2 items-center">
+                <select value={addingIngredientId} onChange={(e) => setAddingIngredientId(e.target.value)}
+                  className="flex-1 h-9 rounded bg-secondary/50 border border-border text-xs px-2 focus:outline-none focus:ring-2 focus:ring-ring font-sans">
+                  <option value="">-- Seleccionar Insumo --</option>
+                  {inventoryItems.map((inv: any) => (
+                    <option key={inv.id} value={inv.id}>{inv.name} ({inv.unit})</option>
+                  ))}
+                </select>
+                <input type="number" step="0.0001" placeholder="Cant" value={addingIngredientQty} onChange={(e) => setAddingIngredientQty(e.target.value)}
+                  className="w-16 h-9 rounded bg-secondary/50 border border-border text-xs text-center font-bold focus:outline-none focus:ring-2 focus:ring-ring" />
+                <Button size="sm" className="h-9 px-3 rounded text-xs" onClick={addRecipeIngredient}>+</Button>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 pt-2">
             <Button variant="outline" className="flex-1" onClick={() => { setCreatingItem(false); setEditItem(null) }}>Cancelar</Button>
             <Button className="flex-1" onClick={saveItem}>{editItem ? 'Guardar' : 'Crear'}</Button>
@@ -680,6 +782,282 @@ function SistemaTab() {
             Usa <code className="bg-secondary/50 px-1 rounded">python manage.py backup</code> para respaldar la base de datos.
             Agrega <code className="bg-secondary/50 px-1 rounded">--s3</code> para subir a S3 (requiere AWS_BACKUP_BUCKET en .env).
           </p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+
+function EmployeesTab() {
+  const [shifts, setShifts] = useState<any[]>([])
+  const [payrollData, setPayrollData] = useState<any>(null)
+  const [payrollHistory, setPayrollHistory] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  
+  // Rango de fechas nómina
+  const today = new Date()
+  const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]
+  const defaultEnd = today.toISOString().split('T')[0]
+  const [startDate, setStartDate] = useState(defaultStart)
+  const [endDate, setEndDate] = useState(defaultEnd)
+
+  // PIN de Asistencia
+  const [attendancePinOpen, setAttendancePinOpen] = useState(false)
+  const [attendanceAction, setAttendanceAction] = useState<'in' | 'out'>('in')
+
+  const fetchShiftsAndHistory = async () => {
+    setLoading(true)
+    try {
+      const sh: any = await api('/core/shifts/')
+      setShifts(sh || [])
+      const pay: any = await api('/core/payroll/')
+      setPayrollHistory(pay || [])
+    } catch {}
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchShiftsAndHistory()
+  }, [])
+
+  const handleClockIn = async (pin: string) => {
+    try {
+      const res: any = await api('/core/users/clock-in/', {
+        method: 'POST',
+        body: JSON.stringify({ pin })
+      })
+      alert(`Entrada registrada para ${res.user} a las ${new Date(res.clock_in).toLocaleTimeString('es-DO')}`)
+      fetchShiftsAndHistory()
+    } catch (err: any) {
+      alert('Error en reloj checador: ' + (err?.detail || 'PIN incorrecto o ya con turno activo'))
+    }
+  }
+
+  const handleClockOut = async (pin: string) => {
+    try {
+      const res: any = await api('/core/users/clock-out/', {
+        method: 'POST',
+        body: JSON.stringify({ pin })
+      })
+      alert(`Salida registrada para ${res.user} a las ${new Date(res.clock_out).toLocaleTimeString('es-DO')}`)
+      fetchShiftsAndHistory()
+    } catch (err: any) {
+      alert('Error en reloj checador: ' + (err?.detail || 'PIN incorrecto o sin turno activo'))
+    }
+  }
+
+  const calculatePayroll = async () => {
+    setLoading(true)
+    try {
+      const data: any = await api(`/core/users/calculate/?period_start=${startDate}&period_end=${endDate}`)
+      setPayrollData(data)
+    } catch {
+      alert('Error al calcular la nómina')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const savePayrollPeriod = async () => {
+    if (!payrollData || !payrollData.employees) return
+    if (!confirm('¿Registrar y cerrar la nómina para este período?')) return
+    
+    setLoading(true)
+    try {
+      for (const emp of payrollData.employees) {
+        await api('/core/payroll/', {
+          method: 'POST',
+          body: JSON.stringify({
+            user: emp.user,
+            period_start: payrollData.period_start,
+            period_end: payrollData.period_end,
+            wages_earned: emp.wages_earned,
+            commissions_earned: emp.commissions_earned,
+            tips_earned: emp.tips_earned,
+            deductions: emp.deductions,
+            net_pay: emp.net_pay,
+            status: 'pending'
+          })
+        })
+      }
+      alert('Nómina del período registrada correctamente')
+      setPayrollData(null)
+      fetchShiftsAndHistory()
+    } catch {
+      alert('Error al guardar la nómina')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const payPayroll = async (id: string) => {
+    if (!confirm('¿Marcar este pago de nómina como Pagado?')) return
+    try {
+      await api(`/core/payroll/${id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'paid' })
+      })
+      fetchShiftsAndHistory()
+    } catch {
+      alert('Error al procesar el pago')
+    }
+  }
+
+  return (
+    <div className="space-y-6 font-sans">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold font-heading">Asistencia y Nóminas</h3>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" className="gap-2" onClick={() => { setAttendanceAction('in'); setAttendancePinOpen(true) }}>
+            Fichar Entrada (Clock In)
+          </Button>
+          <Button size="sm" variant="outline" className="gap-2" onClick={() => { setAttendanceAction('out'); setAttendancePinOpen(true) }}>
+            Fichar Salida (Clock Out)
+          </Button>
+        </div>
+      </div>
+
+      {/* Reloj Checador Pin Modal */}
+      <Modal open={attendancePinOpen} onClose={() => setAttendancePinOpen(false)} title="Reloj de Asistencia">
+        <div className="space-y-4 text-center">
+          <p className="text-sm text-muted-foreground">Ingresa tu PIN de empleado para registrar tu {attendanceAction === 'in' ? 'entrada' : 'salida'}.</p>
+          <div className="flex justify-center">
+            <input
+              type="password"
+              maxLength={6}
+              placeholder="••••"
+              id="attendance-pin-input"
+              className="h-12 w-32 border text-center text-2xl tracking-widest rounded-lg focus:outline-none focus:ring-2 focus:ring-ring bg-secondary/50 font-bold"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const val = (e.target as HTMLInputElement).value
+                  if (attendanceAction === 'in') handleClockIn(val)
+                  else handleClockOut(val)
+                  setAttendancePinOpen(false)
+                }
+              }}
+            />
+          </div>
+          <p className="text-[10px] text-muted-foreground">Presiona Enter para enviar</p>
+        </div>
+      </Modal>
+
+      {/* Calculador de Nómina */}
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <h4 className="font-semibold text-sm">Cierre de Período & Reparto de Propinas</h4>
+          <div className="flex flex-wrap gap-4 items-end">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Inicio</span>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+                className="h-10 rounded border border-border bg-secondary/40 text-sm px-3 focus:outline-none" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Fin</span>
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+                className="h-10 rounded border border-border bg-secondary/40 text-sm px-3 focus:outline-none" />
+            </div>
+            <Button onClick={calculatePayroll} disabled={loading} className="h-10 px-4 gap-2 text-sm ml-2">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Calcular Nómina'}
+            </Button>
+          </div>
+
+          {payrollData && (
+            <div className="pt-4 border-t space-y-4">
+              <div className="flex justify-between items-center bg-secondary/20 p-3 rounded-lg text-xs">
+                <span>Total de Propinas Legales a Repartir: <strong>{formatCurrency(payrollData.total_tips_collected)}</strong></span>
+                <span>Horas Totales del Personal: <strong>{payrollData.total_hours.toFixed(1)} hrs</strong></span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      <th className="p-2">Empleado</th>
+                      <th className="p-2">Rol</th>
+                      <th className="p-2">Horas</th>
+                      <th className="p-2">Salario Base</th>
+                      <th className="p-2">Comisiones</th>
+                      <th className="p-2">Propinas (10%)</th>
+                      <th className="p-2">Consumos (Deduc.)</th>
+                      <th className="p-2 font-bold">Neto a Pagar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payrollData.employees.map((emp: any) => (
+                      <tr key={emp.user} className="border-b last:border-0 hover:bg-muted/10">
+                        <td className="p-2 font-medium">{emp.user_name}</td>
+                        <td className="p-2">{emp.role}</td>
+                        <td className="p-2 font-mono">{emp.hours_worked.toFixed(1)}</td>
+                        <td className="p-2 font-mono">{formatCurrency(emp.wages_earned)}</td>
+                        <td className="p-2 font-mono">{formatCurrency(emp.commissions_earned)}</td>
+                        <td className="p-2 font-mono text-success font-semibold">{formatCurrency(emp.tips_earned)}</td>
+                        <td className="p-2 font-mono text-destructive">{formatCurrency(emp.deductions)}</td>
+                        <td className="p-2 font-mono font-bold text-primary">{formatCurrency(emp.net_pay)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" size="sm" onClick={() => setPayrollData(null)}>Limpiar</Button>
+                <Button size="sm" onClick={savePayrollPeriod}>Registrar y Cerrar Nómina</Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Historial de Nóminas y Pagos */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <h4 className="font-semibold text-sm">Nóminas Cerradas / Historial</h4>
+          {payrollHistory.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic p-4 text-center">No hay registros de nóminas cerradas en el historial.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b text-muted-foreground">
+                    <th className="p-2">Empleado</th>
+                    <th className="p-2">Desde/Hasta</th>
+                    <th className="p-2">Base</th>
+                    <th className="p-2">Comisiones</th>
+                    <th className="p-2">Propina</th>
+                    <th className="p-2">Deducciones</th>
+                    <th className="p-2 font-bold">Neto</th>
+                    <th className="p-2">Estado</th>
+                    <th className="p-2 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payrollHistory.map((p: any) => (
+                    <tr key={p.id} className="border-b last:border-0 hover:bg-muted/10">
+                      <td className="p-2 font-medium">{p.user_name}</td>
+                      <td className="p-2">{p.period_start} a {p.period_end}</td>
+                      <td className="p-2 font-mono">{formatCurrency(parseFloat(p.wages_earned))}</td>
+                      <td className="p-2 font-mono">{formatCurrency(parseFloat(p.commissions_earned))}</td>
+                      <td className="p-2 font-mono">{formatCurrency(parseFloat(p.tips_earned))}</td>
+                      <td className="p-2 font-mono text-destructive">{formatCurrency(parseFloat(p.deductions))}</td>
+                      <td className="p-2 font-mono font-bold text-primary">{formatCurrency(parseFloat(p.net_pay))}</td>
+                      <td className="p-2">
+                        <Badge variant={p.status === 'paid' ? 'default' : 'secondary'} className="text-[10px]">
+                          {p.status === 'paid' ? 'Pagado' : 'Pendiente'}
+                        </Badge>
+                      </td>
+                      <td className="p-2 text-right">
+                        {p.status === 'pending' && (
+                          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs font-semibold text-success hover:bg-success/15" onClick={() => payPayroll(p.id)}>
+                            Pagar
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

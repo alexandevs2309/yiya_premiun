@@ -51,3 +51,18 @@ class PurchaseOrder(models.Model):
 
     def __str__(self):
         return f'PO-{self.id.hex[:8]} ({self.get_status_display()})'
+
+
+class MenuItemRecipe(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    menu_item = models.ForeignKey('pos.MenuItem', on_delete=models.CASCADE, related_name='recipes')
+    inventory_item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name='recipes')
+    quantity = models.DecimalField(max_digits=10, decimal_places=4, help_text='Cantidad consumida por plato')
+
+    class Meta:
+        verbose_name = 'Receta de item'
+        verbose_name_plural = 'Recetas de items'
+        unique_together = ('menu_item', 'inventory_item')
+
+    def __str__(self):
+        return f'{self.menu_item.name} <- {self.quantity} {self.inventory_item.unit} de {self.inventory_item.name}'

@@ -32,39 +32,228 @@ async function refreshToken(): Promise<boolean> {
   }
 }
 
+function uuidv4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('dyiya-offline', 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('queue')) {
+        db.createObjectStore('queue', { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function addToOfflineQueue(path: string, options: any): Promise<string> {
+  const db = await openDB();
+  const id = uuidv4();
+  const req = { id, path, options: JSON.parse(JSON.stringify(options)), timestamp: Date.now() };
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('queue', 'readwrite');
+    const store = tx.objectStore('queue');
+    const request = store.add(req);
+    request.onsuccess = () => resolve(id);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function getOfflineQueue(): Promise<any[]> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('queue', 'readonly');
+      const store = tx.objectStore('queue');
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const sorted = (request.result || []).sort((a: any, b: any) => a.timestamp - b.timestamp);
+        resolve(sorted);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function removeFromOfflineQueue(id: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('queue', 'readwrite');
+    const store = tx.objectStore('queue');
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+let isSyncing = false;
+export async function processOfflineQueue() {
+  if (isSyncing) return;
+  const queue = await getOfflineQueue();
+  if (queue.length === 0) return;
+  isSyncing = true;
+  console.log(`[Offline Sync] Sincronizando ${queue.length} peticiones en cola...`);
+  
+  for (const req of queue) {
+    try {
+      await api(req.path, req.options, true);
+      await removeFromOfflineQueue(req.id);
+      window.dispatchEvent(new CustomEvent('offline-queue-changed'));
+    } catch (err) {
+      console.error(`[Offline Sync] Falló sincronización de ${req.path}:`, err);
+      if (err instanceof Error && (err.message.includes('Failed to fetch') || err.message.includes('Error de red'))) {
+        break;
+      }
+      // Si es un error de negocio (ej. 400), lo descartamos de la cola
+      await removeFromOfflineQueue(req.id);
+      window.dispatchEvent(new CustomEvent('offline-queue-changed'));
+    }
+  }
+  isSyncing = false;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    console.log('[Connection] Conexión recuperada. Sincronizando cola offline...');
+    processOfflineQueue();
+  });
+  setTimeout(processOfflineQueue, 2000);
+}
+
 export async function api<T = unknown>(
   path: string,
   options: RequestInit = {},
+  skipQueue = false,
 ): Promise<T> {
-  const isFormData = options.body instanceof FormData
+  const isFormData = options.body instanceof FormData;
+  const method = options.method || 'GET';
+  const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+
+  // Si estamos desconectados físicamente en el navegador
+  if (typeof navigator !== 'undefined' && !navigator.onLine && isWrite && !skipQueue) {
+    let bodyObj: any = null;
+    if (options.body && typeof options.body === 'string') {
+      try { bodyObj = JSON.parse(options.body); } catch {}
+    }
+    let generatedId = '';
+    if (path.includes('/open/') || path.includes('/add_item/')) {
+      if (bodyObj && !bodyObj.id) {
+        generatedId = uuidv4();
+        bodyObj.id = generatedId;
+        options.body = JSON.stringify(bodyObj);
+      }
+    }
+    await addToOfflineQueue(path, options);
+    window.dispatchEvent(new CustomEvent('offline-queue-changed'));
+
+    if (path.includes('/open/')) {
+      return {
+        id: generatedId,
+        table: parseInt(path.split('/').slice(-3, -2)[0]) || 0,
+        status: 'open',
+        guests: bodyObj?.guests || 2,
+        items: [],
+        created_at: new Date().toISOString(),
+      } as any;
+    }
+    if (path.includes('/add_item/')) {
+      return {
+        id: generatedId,
+        menu_item: bodyObj?.menu_item,
+        name: bodyObj?.name,
+        price: bodyObj?.price,
+        quantity: bodyObj?.quantity || 1,
+        seat: bodyObj?.seat || 1,
+        status: 'pending',
+        modifiers_json: bodyObj?.modifiers_json || [],
+      } as any;
+    }
+    return { status: 'queued', id: generatedId } as any;
+  }
+
   const headers: Record<string, string> = {
     ...(!isFormData && { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
-  }
+  };
   if (accessToken) {
-    headers['Authorization'] = `Bearer ${accessToken}`
+    headers['Authorization'] = `Bearer ${accessToken}`;
   }
 
-  let res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  try {
+    let res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
-  if (res.status === 401 && accessToken) {
-    const refreshed = await refreshToken()
-    if (refreshed) {
-      headers['Authorization'] = `Bearer ${accessToken}`
-      res = await fetch(`${API_BASE}${path}`, { ...options, headers })
-    } else {
-      clearTokens()
-      window.location.href = '/login'
-      throw new Error('Sesión expirada')
+    if (res.status === 401 && accessToken) {
+      const refreshed = await refreshToken();
+      if (refreshed) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+        res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      } else {
+        clearTokens();
+        window.location.href = '/login';
+        throw new Error('Sesión expirada');
+      }
     }
-  }
 
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: 'Error desconocido' }))
-    throw new Error(error.detail || error.message || 'Error de red')
-  }
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Error desconocido' }));
+      throw new Error(error.detail || error.message || 'Error de red');
+    }
 
-  return res.json()
+    return res.json();
+  } catch (err: any) {
+    // Si falla por error de red y no se está reintentando, lo encolamos
+    if (isWrite && !skipQueue) {
+      console.warn(`[Offline Queue] Fallo de red detectado para ${path}. Guardando en IndexedDB...`);
+      let bodyObj: any = null;
+      if (options.body && typeof options.body === 'string') {
+        try { bodyObj = JSON.parse(options.body); } catch {}
+      }
+      let generatedId = '';
+      if (path.includes('/open/') || path.includes('/add_item/')) {
+        if (bodyObj && !bodyObj.id) {
+          generatedId = uuidv4();
+          bodyObj.id = generatedId;
+          options.body = JSON.stringify(bodyObj);
+        }
+      }
+      await addToOfflineQueue(path, options);
+      window.dispatchEvent(new CustomEvent('offline-queue-changed'));
+
+      if (path.includes('/open/')) {
+        return {
+          id: generatedId,
+          table: parseInt(path.split('/').slice(-3, -2)[0]) || 0,
+          status: 'open',
+          guests: bodyObj?.guests || 2,
+          items: [],
+          created_at: new Date().toISOString(),
+        } as any;
+      }
+      if (path.includes('/add_item/')) {
+        return {
+          id: generatedId,
+          menu_item: bodyObj?.menu_item,
+          name: bodyObj?.name,
+          price: bodyObj?.price,
+          quantity: bodyObj?.quantity || 1,
+          seat: bodyObj?.seat || 1,
+          status: 'pending',
+          modifiers_json: bodyObj?.modifiers_json || [],
+        } as any;
+      }
+      return { status: 'queued', id: generatedId } as any;
+    }
+    throw err;
+  }
 }
 
 // Auth
@@ -144,6 +333,7 @@ export const orders = {
       method: 'DELETE',
     }),
   printReceipt: (orderId: string) => api<ReceiptData>(`/pos/orders/${orderId}/print_receipt/`),
+  printHardware: (orderId: string) => api<{ status: string }>(`/pos/orders/${orderId}/print_hardware/`, { method: 'POST' }),
 }
 
 export interface ReceiptData {

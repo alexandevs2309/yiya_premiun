@@ -1,11 +1,11 @@
 from rest_framework import serializers
-from .models import User, Customer, AuditLog
+from .models import User, Customer, AuditLog, EmployeeShift, PayrollPayment
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'phone', 'is_active']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'phone', 'hourly_rate', 'commission_pct', 'is_active']
         read_only_fields = ['id']
 
 
@@ -14,7 +14,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'phone', 'password', 'is_active']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'phone', 'hourly_rate', 'commission_pct', 'password', 'is_active']
 
     def create(self, validated_data):
         password = validated_data.pop('password')
@@ -29,7 +29,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'phone', 'password', 'is_active']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'phone', 'hourly_rate', 'commission_pct', 'password', 'is_active']
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
@@ -58,3 +58,18 @@ class CustomerSerializer(serializers.ModelSerializer):
         model = Customer
         fields = ['id', 'rnc', 'business_name', 'commercial_name', 'phone', 'email', 'address', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class EmployeeShiftSerializer(serializers.ModelSerializer):
+    user_name = serializers.ReadOnlyField(source='user.username')
+    class Meta:
+        model = EmployeeShift
+        fields = ['id', 'user', 'user_name', 'clock_in', 'clock_out', 'active']
+
+
+class PayrollPaymentSerializer(serializers.ModelSerializer):
+    user_name = serializers.ReadOnlyField(source='user.username')
+    class Meta:
+        model = PayrollPayment
+        fields = ['id', 'user', 'user_name', 'period_start', 'period_end', 'wages_earned',
+                  'commissions_earned', 'tips_earned', 'deductions', 'net_pay', 'status', 'created_at']

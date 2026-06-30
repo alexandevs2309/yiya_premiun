@@ -16,16 +16,30 @@ def generar_ecf(payment: Payment, rnc_cliente: str = '', razon_social: str = '',
     ncf = seq.next_ncf()
 
     items = []
-    for oi in order.items.select_related('menu_item').all():
-        gravado = oi.price * Decimal('0.18')
-        items.append({
-            'cantidad': oi.quantity,
-            'descripcion': oi.name,
-            'precio_unitario': float(oi.price),
-            'monto': float(oi.price * oi.quantity),
-            'itbis': float(gravado * oi.quantity),
-            'itbis_type': getattr(oi.menu_item, 'itbis_type', 'gravado') if oi.menu_item else 'gravado',
-        })
+    if payment.items_json:
+        for it in payment.items_json:
+            price = Decimal(str(it['precio']))
+            qty = int(it['cantidad'])
+            gravado = price * Decimal('0.18')
+            items.append({
+                'cantidad': qty,
+                'descripcion': it['nombre'],
+                'precio_unitario': float(price),
+                'monto': float(price * qty),
+                'itbis': float(gravado * qty),
+                'itbis_type': 'gravado',
+            })
+    else:
+        for oi in order.items.select_related('menu_item').exclude(status='cancelled').all():
+            gravado = oi.price * Decimal('0.18')
+            items.append({
+                'cantidad': oi.quantity,
+                'descripcion': oi.name,
+                'precio_unitario': float(oi.price),
+                'monto': float(oi.price * oi.quantity),
+                'itbis': float(gravado * oi.quantity),
+                'itbis_type': getattr(oi.menu_item, 'itbis_type', 'gravado') if oi.menu_item else 'gravado',
+            })
 
     payload = {
         'encabezado': {
@@ -46,6 +60,11 @@ def generar_ecf(payment: Payment, rnc_cliente: str = '', razon_social: str = '',
             'total': float(payment.total),
         },
     }
+
+    if ncf_type == 'B04':
+        original_doc = payment.ecf_documents.filter(ncf_type='B01').first()
+        if original_doc:
+            payload['encabezado']['ncf_modificado'] = original_doc.ncf
 
     doc = ECFDocument.objects.create(
         payment=payment,

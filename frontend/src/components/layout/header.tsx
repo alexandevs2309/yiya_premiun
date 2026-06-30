@@ -3,12 +3,12 @@ import { useAppStore } from '@/stores/app-store'
 import { useThemeStore, applyTheme } from '@/stores/theme-store'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { useEffect, useState, useRef } from 'react'
-import { Sun, Moon, Bell, LogOut, ChevronDown } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Sun, Moon, Bell, LogOut, ChevronDown, Wifi, WifiOff, Glasses } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
-import { clearTokens } from '@/services/api'
+import { clearTokens, getOfflineQueue } from '@/services/api'
 
 function ClockDisplay() {
   const [time, setTime] = useState(new Date())
@@ -28,9 +28,58 @@ function ClockDisplay() {
   )
 }
 
+function NetworkStatus() {
+  const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [queueCount, setQueueCount] = useState(0);
+
+  const updateQueueCount = useCallback(async () => {
+    const queue = await getOfflineQueue();
+    setQueueCount(queue.length);
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    const handleQueueChange = () => {
+      updateQueueCount();
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('offline-queue-changed', handleQueueChange);
+
+    updateQueueCount();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('offline-queue-changed', handleQueueChange);
+    };
+  }, [updateQueueCount]);
+
+  if (online && queueCount === 0) {
+    return (
+      <Badge variant="secondary" className="bg-success/15 text-success hover:bg-success/20 border-success/30 flex items-center gap-1 text-[10px] h-5">
+        <Wifi className="w-3 h-3" /> Online
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="destructive" className={cn(
+      "flex items-center gap-1 text-[10px] h-5 font-normal",
+      !online && "animate-pulse"
+    )}>
+      <WifiOff className="w-3 h-3" />
+      {!online ? 'Offline' : 'Sincronizando'}
+      {queueCount > 0 && ` (${queueCount})`}
+    </Badge>
+  );
+}
+
 export function Header() {
   const { activeModule } = useNavigationStore()
-  const { user, setUser } = useAppStore()
+  const { user, setUser, solMode, toggleSolMode } = useAppStore()
   const { theme, toggleTheme } = useThemeStore()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -90,6 +139,7 @@ export function Header() {
             {user.role}
           </Badge>
         )}
+        <NetworkStatus />
       </div>
 
       <div className="flex items-center gap-1">
@@ -100,6 +150,14 @@ export function Header() {
         <Button variant="ghost" size="icon" onClick={toggleTheme} title={theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}
           className="text-muted-foreground hover:text-foreground">
           {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </Button>
+
+        <Button variant="ghost" size="icon" onClick={toggleSolMode} title={solMode ? 'Desactivar Modo Sol (Exterior)' : 'Activar Modo Sol (Exterior)'}
+          className={cn(
+            "text-muted-foreground hover:text-foreground",
+            solMode && "text-warning hover:text-warning"
+          )}>
+          <Glasses className="w-4 h-4" />
         </Button>
 
         <Button variant="ghost" size="icon" className="relative hidden sm:flex text-muted-foreground hover:text-foreground" title="Notificaciones">

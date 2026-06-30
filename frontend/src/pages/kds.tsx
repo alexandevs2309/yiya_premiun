@@ -4,14 +4,54 @@ import { Button } from '@/components/ui/button'
 import { motion } from 'framer-motion'
 import { orders as ordersApi } from '@/services/api'
 import { cn } from '@/lib/utils'
-import { ChefHat, CheckCircle2 } from 'lucide-react'
+import { ChefHat, CheckCircle2, Volume2, VolumeX } from 'lucide-react'
 import type { Order } from '@/types'
 
 export function KDSPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [station, setStation] = useState('todas')
+  const [audioEnabled, setAudioEnabled] = useState(false)
+  const [prevOrderIds, setPrevOrderIds] = useState<string[]>([])
   const ws = useRef<WebSocket | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const speakOrder = useCallback((order: Order) => {
+    if (!window.speechSynthesis) return
+    
+    const mesaText = `Mesa ${order.table_number}.`
+    const platosText = order.items
+      .filter((i) => i.status === 'in_kitchen' || i.status === 'pending')
+      .map((i) => `${i.quantity} ${i.name}`)
+      .join(', ')
+      
+    if (!platosText) return
+    
+    const utterance = new SpeechSynthesisUtterance(`${mesaText} prepararse: ${platosText}`)
+    utterance.lang = 'es-ES'
+    window.speechSynthesis.speak(utterance)
+  }, [])
+
+  useEffect(() => {
+    if (!audioEnabled) return
+    
+    const currentIds = orders.map((o) => o.id)
+    const newOrders = orders.filter((o) => !prevOrderIds.includes(o.id))
+    
+    if (prevOrderIds.length > 0 && newOrders.length > 0) {
+      newOrders.forEach((o) => {
+        speakOrder(o)
+      })
+    }
+    
+    setPrevOrderIds(currentIds)
+  }, [orders, prevOrderIds, audioEnabled, speakOrder])
+
+  // Inicializar IDs de órdenes al cargar por primera vez
+  useEffect(() => {
+    if (orders.length > 0 && prevOrderIds.length === 0) {
+      setPrevOrderIds(orders.map((o) => o.id))
+    }
+  }, [orders])
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -70,7 +110,8 @@ export function KDSPage() {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-6 space-y-6">
-      <div className="flex gap-2 overflow-x-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex gap-2 overflow-x-auto">
           {['todas', 'cocina', 'barra'].map((s) => (
             <Button key={s} variant={station === s ? 'default' : 'outline'} size="sm"
               onClick={() => setStation(s)} className="text-xs whitespace-nowrap">
@@ -79,6 +120,22 @@ export function KDSPage() {
             </Button>
           ))}
         </div>
+
+        <Button variant={audioEnabled ? 'default' : 'outline'} size="sm"
+          onClick={() => setAudioEnabled(!audioEnabled)} className="flex items-center gap-1.5 text-xs w-fit">
+          {audioEnabled ? (
+            <>
+              <Volume2 className="w-4 h-4 text-success shrink-0" />
+              <span>Voz Activa</span>
+            </>
+          ) : (
+            <>
+              <VolumeX className="w-4 h-4 text-muted-foreground shrink-0" />
+              <span>Activar Alertas de Voz</span>
+            </>
+          )}
+        </Button>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
         {pending.map((order) => (

@@ -60,9 +60,14 @@ class TableViewSet(viewsets.ModelViewSet):
         guests = request.data.get('guests', 1)
         table.status = 'occupied'
         table.save()
-        order = Order.objects.create(
-            table=table, waiter=request.user, guests=guests
-        )
+        
+        # Permitir id de cliente para sincronización offline
+        order_id = request.data.get('id')
+        create_kwargs = {'table': table, 'waiter': request.user, 'guests': guests}
+        if order_id:
+            create_kwargs['id'] = order_id
+            
+        order = Order.objects.create(**create_kwargs)
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])
@@ -96,7 +101,13 @@ class OrderViewSet(viewsets.ModelViewSet):
         serializer = OrderItemSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        serializer.save(order=order)
+        
+        # Permitir id de cliente para sincronización offline
+        item_id = request.data.get('id')
+        if item_id:
+            serializer.save(order=order, id=item_id)
+        else:
+            serializer.save(order=order)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def _broadcast_kds(self, order, event_type: str):
@@ -120,11 +131,20 @@ class OrderViewSet(viewsets.ModelViewSet):
     def send_to_kitchen(self, request, pk=None):
         order = self.get_object()
         with transaction.atomic():
+            pending_items = list(order.items.filter(status='pending'))
             order.items.filter(status='pending').update(status='in_kitchen')
             order.status = 'in_kitchen'
             order.save()
         order.refresh_from_db()
         self._broadcast_kds(order, 'new_order')
+
+        # Imprimir comanda de cocina automáticamente
+        try:
+            from .utils.print_service import imprimir_comanda_cocina
+            imprimir_comanda_cocina(order, pending_items)
+        except Exception:
+            pass
+
         return Response({'status': 'ok', 'sent': order.items.filter(status='in_kitchen').count()})
 
     @action(detail=True, methods=['post'])
@@ -201,6 +221,21 @@ class OrderViewSet(viewsets.ModelViewSet):
             'efectivo': float(payment.cash_received) if payment.cash_received else None,
             'cambio': float(payment.change_given) if payment.change_given else None,
         })
+
+    @action(detail=True, methods=['post'])
+    def print_hardware(self, request, pk=None):
+        order = self.get_object()
+        payment = getattr(order, 'payment', None)
+        if not payment:
+            return Response({'error': 'La orden no tiene pago registrado'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from .utils.print_service import imprimir_ticket_pago
+            imprimir_ticket_pago(payment, order)
+        except Exception as e:
+            return Response({'error': f'Falló la impresión física: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({'status': 'ok'})
 
     @action(detail=True, methods=['delete'], url_path='remove_item/(?P<item_pk>[^/.]+)')
     def remove_item(self, request, pk=None, item_pk=None):

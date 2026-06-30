@@ -40,7 +40,7 @@ class Payment(models.Model):
         ('mixed', 'Mixto'),
     ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    order = models.OneToOneField('pos.Order', on_delete=models.CASCADE, related_name='payment')
+    order = models.ForeignKey('pos.Order', on_delete=models.CASCADE, related_name='payments')
     method = models.CharField(max_length=10, choices=METHOD_CHOICES)
     subtotal = models.DecimalField(max_digits=10, decimal_places=2)
     itbis = models.DecimalField(max_digits=10, decimal_places=2)
@@ -49,6 +49,9 @@ class Payment(models.Model):
     cash_received = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     change_given = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     processed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    items_json = models.JSONField(blank=True, null=True, help_text='Detalle de ítems pagados')
+    employee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='employee_purchases')
+    deduct_from_payroll = models.BooleanField(default=False, help_text='Deducir de nómina')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

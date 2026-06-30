@@ -76,7 +76,8 @@ export function POSPage() {
       price_adjustment: o.price_adjustment,
     }))
     const extraPrice = modifiers_json.reduce((s, m) => s + m.price_adjustment, 0)
-    const price = modItem.price + extraPrice
+    const basePrice = modItem.effective_price ? parseFloat(modItem.effective_price as any) : modItem.price
+    const price = basePrice + extraPrice
     try {
       await ordersApi.addItem(activeOrderId, {
         menu_item: modItem.id,
@@ -98,7 +99,7 @@ export function POSPage() {
       await ordersApi.addItem(activeOrderId, {
         menu_item: item.id,
         name: item.name,
-        price: item.price,
+        price: item.effective_price ? parseFloat(item.effective_price as any) : item.price,
         quantity: 1,
         seat: 1,
         status: 'pending',
@@ -181,7 +182,9 @@ export function POSPage() {
                   </div>
                   <p className="text-sm font-medium truncate">{item.name}</p>
                   <div className="flex items-center justify-between mt-1">
-                    <span className="text-sm font-bold text-primary">{formatCurrency(item.price)}</span>
+                    <span className="text-sm font-bold text-primary">
+                      {formatCurrency(item.effective_price ? parseFloat(item.effective_price as any) : item.price)}
+                    </span>
                     <div className="flex items-center gap-1">
                       {item.itbis_type === 'gravado' && (
                         <Badge variant="secondary" className="text-[9px] px-1">ITBIS</Badge>

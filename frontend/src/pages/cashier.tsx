@@ -8,7 +8,9 @@ import { useAppStore } from '@/stores/app-store'
 import { useNavigationStore } from '@/stores/navigation-store'
 import { api, orders as ordersApi, tables, type ReceiptData } from '@/services/api'
 import { Receipt } from '@/components/receipt'
-import { ArrowLeft, CheckCircle2, CreditCard, DollarSign, Smartphone, Loader2, Calculator, Printer } from 'lucide-react'
+import { PinAuthModal } from '@/components/ui/pin-auth-modal'
+import { Badge } from '@/components/ui/badge'
+import { ArrowLeft, CheckCircle2, CreditCard, DollarSign, Smartphone, Loader2, Calculator, Printer, Users, Percent, UserCheck } from 'lucide-react'
 import type { Order } from '@/types'
 
 type PaymentMethod = 'cash' | 'cardnet' | 'tpago' | 'mixed' | null
@@ -21,55 +23,158 @@ export function CashierPage() {
   const [processing, setProcessing] = useState(false)
   const [done, setDone] = useState(false)
   const [cashReceived, setCashReceived] = useState('')
+  const [createdPaymentId, setCreatedPaymentId] = useState<string | null>(null)
 
-  useEffect(() => {
+  // Split bill states
+  const [splitMode, setSplitMode] = useState<'none' | 'equal' | 'items'>('none')
+  const [numSplits, setNumSplits] = useState(2)
+  const [selectedItems, setSelectedItems] = useState<Record<string, number>>({}) // item.id -> qty to pay
+
+  // Discount states
+  const [discountType, setDiscountType] = useState<'none' | 'employee' | 'custom'>('none')
+  const [customDiscountPct, setCustomDiscountPct] = useState('0')
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('')
+  const [deductFromPayroll, setDeductFromPayroll] = useState(false)
+  const [users, setUsers] = useState<any[]>([])
+
+  // PIN security states
+  const [pinAuthOpen, setPinAuthOpen] = useState(false)
+  const [pinAction, setPinAction] = useState<() => void>(() => {})
+
+  const fetchOrder = useCallback(() => {
     if (activeOrderId) {
       ordersApi.get(activeOrderId).then(setOrder).catch(() => {})
     }
   }, [activeOrderId])
 
-  const subtotal = order?.items.reduce((s, i) => s + i.price * i.quantity, 0) || 0
-  const itbis = subtotal * 0.18
-  const propina = subtotal * 0.10
-  const total = subtotal + itbis + propina
+  useEffect(() => {
+    fetchOrder()
+    api('/core/users/').then((data: any) => {
+      setUsers(data || [])
+    }).catch(() => {})
+  }, [fetchOrder])
+
+  // Sum of already paid item quantities
+  const paidItemsQuantities: Record<string, number> = {}
+  const paymentsList = (order as any)?.payments || []
+  paymentsList.forEach((p: any) => {
+    if (p.items_json) {
+      p.items_json.forEach((it: any) => {
+        if (it.item_id) {
+          paidItemsQuantities[it.item_id] = (paidItemsQuantities[it.item_id] || 0) + it.cantidad
+        }
+      })
+    }
+  })
+
+  // Calculate order total already paid
+  const totalPaidAlready = paymentsList.reduce((sum: number, p: any) => sum + p.total, 0) || 0
+
+  // Base order subtotal
+  const fullOrderSubtotal = order?.items.reduce((s, i) => s + i.price * i.quantity, 0) || 0
+
+  // Calculate base subtotal for current transaction
+  let subtotal = 0
+  if (splitMode === 'equal') {
+    subtotal = fullOrderSubtotal / numSplits
+  } else if (splitMode === 'items') {
+    subtotal = order?.items.reduce((sum, item) => {
+      const qtyToPay = selectedItems[item.id] || 0
+      return sum + (item.price * qtyToPay)
+    }, 0) || 0
+  } else {
+    if (totalPaidAlready > 0) {
+      const remainingTotal = (fullOrderSubtotal * 1.28) - totalPaidAlready
+      subtotal = remainingTotal / 1.28
+    } else {
+      subtotal = fullOrderSubtotal
+    }
+  }
+
+  // Calculate Discount Amount
+  let discountAmt = 0
+  if (discountType === 'employee') {
+    discountAmt = subtotal * 0.50
+  } else if (discountType === 'custom') {
+    const pct = parseFloat(customDiscountPct) || 0
+    discountAmt = subtotal * (pct / 100)
+  }
+
+  const finalSubtotal = Math.max(0, subtotal - discountAmt)
+  const itbis = finalSubtotal * 0.18
+  const propina = finalSubtotal * 0.10
+  const total = finalSubtotal + itbis + propina
 
   const cashReceivedNum = parseFloat(cashReceived) || 0
   const change = cashReceivedNum - total
   const isValidCash = !(method === 'cash' && cashReceivedNum < total)
 
-  const handlePay = async () => {
-    if (!activeOrderId || !method || !order) return
+  const handlePayClick = () => {
+    if (!activeOrderId || !order) return
+    
+    // Require PIN for any discount or payroll deduction
+    if (discountType !== 'none' || deductFromPayroll) {
+      setPinAction(() => () => proceedWithPayment())
+      setPinAuthOpen(true)
+    } else {
+      proceedWithPayment()
+    }
+  }
+
+  const proceedWithPayment = async () => {
+    if (!activeOrderId || !order) return
     setProcessing(true)
     try {
-      await api('/billing/payments/', {
+      const res: any = await api('/billing/payments/', {
         method: 'POST',
         body: JSON.stringify({
           order: activeOrderId,
-          method,
+          method: deductFromPayroll ? 'mixed' : (method || 'cash'),
           subtotal,
           itbis,
           propina,
           total,
-          cash_received: method === 'cash' ? cashReceivedNum : null,
-          change_given: method === 'cash' && change >= 0 ? change : null,
+          cash_received: method === 'cash' && !deductFromPayroll ? cashReceivedNum : null,
+          change_given: method === 'cash' && !deductFromPayroll && change >= 0 ? change : null,
+          items_json: splitMode === 'items' ? order?.items
+            .filter(item => (selectedItems[item.id] || 0) > 0)
+            .map(item => ({
+              item_id: item.id,
+              nombre: item.name,
+              cantidad: selectedItems[item.id],
+              precio: item.price
+            })) : (splitMode === 'equal' ? [{
+              item_id: null,
+              nombre: `Parte de cuenta (1/${numSplits})`,
+              cantidad: 1,
+              precio: subtotal
+            }] : null),
+          employee: discountType === 'employee' ? selectedEmployeeId : null,
+          deduct_from_payroll: deductFromPayroll,
         }),
       })
-      await api(`/pos/orders/${activeOrderId}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'paid' }),
-      })
-      if (order.table) {
-        await tables.close(order.table)
+      if (res && res.id) {
+        setCreatedPaymentId(res.id)
       }
-    } catch {}
-    setProcessing(false)
-    setDone(true)
+      setDone(true)
+    } catch (err) {
+      alert('Error al registrar pago')
+    } finally {
+      setProcessing(false)
+    }
   }
 
   const handleDone = () => {
     setActiveOrder(null)
     setActiveTable(null)
     setActiveModule('floor-plan')
+  }
+
+  const handleItemQtyChange = (itemId: string, currentVal: number, maxVal: number) => {
+    setSelectedItems(prev => ({
+      ...prev,
+      [itemId]: Math.min(maxVal, Math.max(0, currentVal))
+    }))
   }
 
   if (!activeOrderId && !done) {
@@ -89,128 +194,308 @@ export function CashierPage() {
 
   if (done) {
     return (
-      <DoneScreen orderId={activeOrderId} onDone={handleDone} />
+      <DoneScreen paymentId={createdPaymentId} onDone={handleDone} />
     )
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 p-6 space-y-6 max-w-4xl mx-auto">
-      <Button variant="ghost" size="sm" onClick={() => setActiveModule('pos')} className="gap-1">
-        <ArrowLeft className="w-3 h-3" /> Volver
-      </Button>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 p-6 space-y-6 max-w-5xl mx-auto font-sans">
+      <div className="flex items-center justify-between border-b pb-4">
+        <Button variant="ghost" size="sm" onClick={() => setActiveModule('pos')} className="gap-1">
+          <ArrowLeft className="w-3 h-3" /> Volver
+        </Button>
+        <h2 className="text-xl font-bold font-heading">Cobro de Mesa {order?.table_number}</h2>
+        {totalPaidAlready > 0 && (
+          <Badge className="bg-success text-success-foreground">
+            Abonado: {formatCurrency(totalPaidAlready)}
+          </Badge>
+        )}
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-4">
-          <h3 className="font-semibold text-sm">Método de pago</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { id: 'cash' as const, label: 'Efectivo', icon: DollarSign, desc: 'RD$ / US$' },
-              { id: 'cardnet' as const, label: 'CardNET', icon: CreditCard, desc: 'Débito / Crédito' },
-              { id: 'tpago' as const, label: 'tPago', icon: Smartphone, desc: 'Transferencia' },
-              { id: 'mixed' as const, label: 'Mixto', icon: CreditCard, desc: 'Efectivo + Tarjeta' },
-            ].map((pm) => {
-              const Icon = pm.icon
-              const isSelected = method === pm.id
-              return (
-                <Card key={pm.id} className={cn('cursor-pointer transition-all', isSelected && 'ring-2 ring-primary')}
-                  onClick={() => setMethod(pm.id)}>
-                  <CardContent className="p-4 text-center">
-                    <Icon className="w-8 h-8 mx-auto mb-2" />
-                    <p className="text-sm font-medium">{pm.label}</p>
-                    <p className="text-[10px] text-muted-foreground">{pm.desc}</p>
-                  </CardContent>
-                </Card>
-              )
-            })}
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          {/* Configuración de División */}
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <Users className="w-4 h-4 text-primary" /> División de Cuenta
+              </h3>
+              <div className="flex gap-2">
+                <Button variant={splitMode === 'none' ? 'default' : 'outline'} size="sm" onClick={() => { setSplitMode('none'); setSelectedItems({}) }}>
+                  Cuenta Completa
+                </Button>
+                <Button variant={splitMode === 'equal' ? 'default' : 'outline'} size="sm" onClick={() => { setSplitMode('equal'); setSelectedItems({}) }}>
+                  Partes Iguales
+                </Button>
+                <Button variant={splitMode === 'items' ? 'default' : 'outline'} size="sm" onClick={() => setSplitMode('items')}>
+                  Por Ítems
+                </Button>
+              </div>
 
-          {method && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
-              {method === 'cash' && (
-                <div className="space-y-2">
-                  <label className="text-xs text-muted-foreground">Efectivo recibido</label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <Calculator className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <input type="number" inputMode="decimal" step="0.01" min="0"
-                        value={cashReceived}
-                        onChange={(e) => setCashReceived(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full h-12 pl-10 pr-3 rounded-lg bg-secondary/50 border border-border text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-ring" />
-                    </div>
-                    <Button variant="outline" size="sm" className="shrink-0"
-                      onClick={() => setCashReceived(total.toFixed(2))}>
-                      Exacto
-                    </Button>
+              {splitMode === 'equal' && (
+                <div className="flex items-center gap-3 p-3 bg-secondary/30 rounded-lg">
+                  <span className="text-sm">Número de partes:</span>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="icon" className="w-8 h-8" onClick={() => setNumSplits(Math.max(2, numSplits - 1))}>-</Button>
+                    <span className="font-bold font-number w-6 text-center">{numSplits}</span>
+                    <Button variant="outline" size="icon" className="w-8 h-8" onClick={() => setNumSplits(numSplits + 1)}>+</Button>
                   </div>
-                  {cashReceivedNum > 0 && (
-                    <div className="flex justify-between text-sm px-1">
-                      <span className="text-muted-foreground">Vuelto</span>
-                      <span className={cn('font-bold', change >= 0 ? 'text-success' : 'text-destructive')}>
-                        {formatCurrency(Math.abs(change))}
-                        {change < 0 && ' (falta)'}
-                      </span>
-                    </div>
-                  )}
+                  <span className="text-sm font-semibold ml-auto text-primary">
+                    Monto por persona: {formatCurrency((fullOrderSubtotal * 1.28) / numSplits)}
+                  </span>
                 </div>
               )}
-              <Button size="xl" className="w-full text-base gap-2"
-                onClick={handlePay} disabled={processing || !isValidCash}>
-                {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-                {processing ? 'Procesando...' : `Cobrar ${formatCurrency(total)}`}
-              </Button>
-            </motion.div>
+
+              {splitMode === 'items' && order && (
+                <div className="space-y-2 max-h-60 overflow-y-auto border rounded-lg p-3 bg-secondary/10">
+                  <span className="text-xs text-muted-foreground block mb-2">Selecciona la cantidad a pagar de cada producto en este abono:</span>
+                  {order.items.map((item) => {
+                    const maxQty = Math.max(0, item.quantity - (paidItemsQuantities[item.id] || 0))
+                    const selected = selectedItems[item.id] || 0
+                    
+                    return (
+                      <div key={item.id} className="flex items-center justify-between py-2 border-b last:border-0 text-sm">
+                        <div className="flex flex-col">
+                          <span className="font-medium">{item.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatCurrency(item.price)} c/u (Restan: {maxQty} de {item.quantity})
+                          </span>
+                        </div>
+                        {maxQty === 0 ? (
+                          <span className="text-xs font-semibold text-success">Totalmente pagado</span>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Button variant="outline" size="icon" className="w-7 h-7" disabled={selected <= 0} onClick={() => handleItemQtyChange(item.id, selected - 1, maxQty)}>-</Button>
+                            <span className="font-bold w-6 text-center">{selected}</span>
+                            <Button variant="outline" size="icon" className="w-7 h-7" disabled={selected >= maxQty} onClick={() => handleItemQtyChange(item.id, selected + 1, maxQty)}>+</Button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Descuentos y Consumo Empleado */}
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <Percent className="w-4 h-4 text-accent" /> Descuentos y Cortesías
+              </h3>
+              <div className="flex gap-2">
+                <Button variant={discountType === 'none' ? 'default' : 'outline'} size="sm" onClick={() => { setDiscountType('none'); setDeductFromPayroll(false) }}>
+                  Ninguno
+                </Button>
+                <Button variant={discountType === 'employee' ? 'default' : 'outline'} size="sm" onClick={() => { setDiscountType('employee'); setDeductFromPayroll(true) }}>
+                  Consumo Empleado (50%)
+                </Button>
+                <Button variant={discountType === 'custom' ? 'default' : 'outline'} size="sm" onClick={() => { setDiscountType('custom'); setDeductFromPayroll(false) }}>
+                  Otro %
+                </Button>
+              </div>
+
+              {discountType === 'employee' && (
+                <div className="space-y-3 p-3 bg-secondary/30 rounded-lg">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs text-muted-foreground">Seleccionar Empleado</label>
+                    <select
+                      value={selectedEmployeeId}
+                      onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                      className="w-full h-10 rounded-lg bg-background border border-border text-sm px-3 focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="">-- Seleccionar --</option>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.id}>{u.username} ({u.role})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer mt-2 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={deductFromPayroll}
+                      onChange={(e) => setDeductFromPayroll(e.target.checked)}
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-ring"
+                    />
+                    Deducir de nómina del empleado
+                  </label>
+                </div>
+              )}
+
+              {discountType === 'custom' && (
+                <div className="flex items-center gap-3 p-3 bg-secondary/30 rounded-lg">
+                  <span className="text-sm">Porcentaje de descuento:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={customDiscountPct}
+                    onChange={(e) => setCustomDiscountPct(e.target.value)}
+                    className="w-20 h-10 rounded-lg bg-background border border-border text-center font-bold focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <span className="font-bold">%</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Método de pago */}
+          {!deductFromPayroll && (
+            <Card>
+              <CardContent className="p-4 space-y-4">
+                <h3 className="font-semibold text-sm">Método de pago</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { id: 'cash' as const, label: 'Efectivo', icon: DollarSign, desc: 'RD$ / US$' },
+                    { id: 'cardnet' as const, label: 'CardNET', icon: CreditCard, desc: 'Tarjeta' },
+                    { id: 'tpago' as const, label: 'tPago', icon: Smartphone, desc: 'Transferencia' },
+                    { id: 'mixed' as const, label: 'Mixto', icon: CreditCard, desc: 'Efectivo+Tarj' },
+                  ].map((pm) => {
+                    const Icon = pm.icon
+                    const isSelected = method === pm.id
+                    return (
+                      <Card key={pm.id} className={cn('cursor-pointer transition-all hover:bg-muted/10', isSelected && 'ring-2 ring-primary bg-primary/5')}
+                        onClick={() => setMethod(pm.id)}>
+                        <CardContent className="p-3 text-center flex flex-col items-center">
+                          <Icon className="w-6 h-6 mb-1 text-primary" />
+                          <p className="text-xs font-semibold">{pm.label}</p>
+                          <p className="text-[9px] text-muted-foreground">{pm.desc}</p>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+
+                {method === 'cash' && (
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Efectivo recibido</label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Calculator className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <input type="number" inputMode="decimal" step="0.01" min="0"
+                          value={cashReceived}
+                          onChange={(e) => setCashReceived(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full h-12 pl-10 pr-3 rounded-lg bg-secondary/50 border border-border text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-ring" />
+                      </div>
+                      <Button variant="outline" size="sm" className="shrink-0"
+                        onClick={() => setCashReceived(total.toFixed(2))}>
+                        Exacto
+                      </Button>
+                    </div>
+                    {cashReceivedNum > 0 && (
+                      <div className="flex justify-between text-sm px-1">
+                        <span className="text-muted-foreground">Vuelto</span>
+                        <span className={cn('font-bold', change >= 0 ? 'text-success' : 'text-destructive')}>
+                          {formatCurrency(Math.abs(change))}
+                          {change < 0 && ' (falta)'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {deductFromPayroll && (
+            <div className="p-4 bg-primary/10 rounded-xl flex items-center gap-3 text-primary text-sm font-medium border border-primary/20">
+              <UserCheck className="w-5 h-5 text-primary shrink-0" />
+              <span>El consumo será cargado como una deducción de nómina para <strong>{users.find(u => u.id === selectedEmployeeId)?.username || 'el empleado seleccionado'}</strong>.</span>
+            </div>
           )}
         </div>
 
-        <Card>
-          <CardContent className="p-6 space-y-3">
-            <h3 className="font-semibold text-sm">Resumen</h3>
-            <div className="space-y-2 max-h-40 overflow-auto">
-              {order?.items.map((item) => (
-                <div key={item.id} className="flex justify-between text-xs">
-                  <span className="text-muted-foreground truncate mr-2">{item.quantity}x {item.name}</span>
-                  <span className="shrink-0">{formatCurrency(item.price * item.quantity)}</span>
+        {/* Resumen de cobro lateral */}
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <h3 className="font-semibold text-sm">Resumen de Cuenta</h3>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {order?.items.map((item) => (
+                  <div key={item.id} className="flex justify-between text-xs py-1 border-b border-border/30 last:border-0">
+                    <span className="text-muted-foreground truncate mr-2">{item.quantity}x {item.name}</span>
+                    <span className="shrink-0 font-number font-semibold">{formatCurrency(item.price * item.quantity)}</span>
+                  </div>
+                ))}
+              </div>
+              <Separator />
+
+              <div className="space-y-1.5 text-xs text-muted-foreground">
+                <div className="flex justify-between">
+                  <span>Monto Base Seleccionado</span>
+                  <span className="font-number">{formatCurrency(subtotal)}</span>
                 </div>
-              ))}
-            </div>
-            <Separator />
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Subtotal</span>
-              <span>{formatCurrency(subtotal)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">ITBIS (18%)</span>
-              <span>{formatCurrency(itbis)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Propina (10%)</span>
-              <span>{formatCurrency(propina)}</span>
-            </div>
-            <Separator />
-            <div className="flex justify-between font-bold text-lg">
-              <span>Total</span>
-              <span>{formatCurrency(total)}</span>
-            </div>
-          </CardContent>
-        </Card>
+                {discountAmt > 0 && (
+                  <div className="flex justify-between text-destructive font-semibold">
+                    <span>Descuento Aplicado</span>
+                    <span className="font-number">-{formatCurrency(discountAmt)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span>Subtotal Neto</span>
+                  <span className="font-number">{formatCurrency(finalSubtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>ITBIS (18%)</span>
+                  <span className="font-number">{formatCurrency(itbis)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Propina Legal (10%)</span>
+                  <span className="font-number">{formatCurrency(propina)}</span>
+                </div>
+              </div>
+              
+              <Separator />
+              <div className="flex justify-between font-bold text-xl font-heading text-primary">
+                <span>Total a Cobrar</span>
+                <span className="font-number">{formatCurrency(total)}</span>
+              </div>
+
+              <Button
+                size="xl"
+                className="w-full text-base gap-2 rounded-xl mt-2"
+                onClick={handlePayClick}
+                disabled={processing || (!deductFromPayroll && (!method || !isValidCash)) || (discountType === 'employee' && !selectedEmployeeId)}
+              >
+                {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+                {processing ? 'Procesando...' : (deductFromPayroll ? 'Descontar de Nómina' : `Cobrar ${formatCurrency(total)}`)}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       </div>
+
+      <PinAuthModal
+        open={pinAuthOpen}
+        onClose={() => setPinAuthOpen(false)}
+        onAuthorized={pinAction}
+        title="Verificación de Administrador"
+        description="Se requiere el PIN de un administrador para aprobar descuentos y/o consumos especiales de personal."
+      />
     </motion.div>
   )
 }
 
-function DoneScreen({ orderId, onDone }: { orderId: string | null; onDone: () => void }) {
+function DoneScreen({ paymentId, onDone }: { paymentId: string | null; onDone: () => void }) {
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
   const [loadingReceipt, setLoadingReceipt] = useState(true)
   const receiptRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (orderId) {
-      ordersApi.printReceipt(orderId).then(setReceipt).catch(() => {}).finally(() => setLoadingReceipt(false))
+    if (paymentId) {
+      api(`/billing/payments/${paymentId}/print_receipt/`)
+        .then((res: any) => setReceipt(res))
+        .catch(() => {})
+        .finally(() => setLoadingReceipt(false))
     }
-  }, [orderId])
+  }, [paymentId])
 
-  const handlePrint = useCallback(() => {
+  const handlePrint = useCallback(async () => {
+    if (paymentId) {
+      api(`/billing/payments/${paymentId}/print_hardware/`, { method: 'POST' }).catch(() => {})
+    }
     if (!receipt) return
     const win = window.open('', '_blank', 'width=400,height=600')
     if (!win) return
@@ -221,29 +506,29 @@ function DoneScreen({ orderId, onDone }: { orderId: string | null; onDone: () =>
       </body></html>
     `)
     win.document.close()
-  }, [receipt])
+  }, [receipt, paymentId])
 
   return (
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-      className="flex-1 flex items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
-        <CardContent className="p-8 text-center space-y-4">
+      className="flex-1 flex items-center justify-center p-6 font-sans">
+      <Card className="w-full max-w-sm rounded-2xl border-border shadow-xl">
+        <CardContent className="p-8 text-center space-y-4 flex flex-col items-center">
           <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 300 }}>
-            <CheckCircle2 className="w-16 h-16 text-success mx-auto mb-4" />
+            <CheckCircle2 className="w-16 h-16 text-success mx-auto mb-2 animate-bounce" />
           </motion.div>
-          <h2 className="text-xl font-bold mb-1">Pago completado</h2>
+          <h2 className="text-xl font-bold mb-1 font-heading">Pago completado</h2>
           <p className="text-sm text-muted-foreground">Gracias por su visita</p>
 
           <div className="hidden">
             {receipt && <Receipt ref={receiptRef} data={receipt} />}
           </div>
 
-          <div className="flex flex-col gap-2 pt-2">
-            <Button onClick={handlePrint} disabled={!receipt || loadingReceipt} className="w-full gap-2">
+          <div className="flex flex-col gap-2 pt-4 w-full">
+            <Button onClick={handlePrint} disabled={!receipt || loadingReceipt} className="w-full gap-2 rounded-xl">
               <Printer className="w-4 h-4" />
               {loadingReceipt ? 'Cargando...' : 'Imprimir Recibo'}
             </Button>
-            <Button onClick={onDone} variant="outline" className="w-full gap-2">
+            <Button onClick={onDone} variant="outline" className="w-full gap-2 rounded-xl">
               <ArrowLeft className="w-4 h-4" /> Volver al plano
             </Button>
           </div>

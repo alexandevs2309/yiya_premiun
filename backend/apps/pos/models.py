@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
 
@@ -30,6 +31,11 @@ class MenuItem(models.Model):
     is_available = models.BooleanField(default=True)
     image = models.ImageField(upload_to='menu/', blank=True, null=True)
     has_modifiers = models.BooleanField(default=False)
+    price_today = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        blank=True, null=True,
+        help_text='Precio variable del día (mariscos). Si está vacío, se usa price.',
+    )
 
     class Meta:
         verbose_name = 'Item del menú'
@@ -38,6 +44,10 @@ class MenuItem(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def effective_price(self) -> Decimal:
+        return self.price_today if self.price_today is not None else self.price
 
 
 class ModifierGroup(models.Model):

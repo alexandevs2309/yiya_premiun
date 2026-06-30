@@ -1,5 +1,5 @@
 from datetime import timedelta
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 from django.db.models.functions import TruncHour
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -82,6 +82,19 @@ def dashboard(request):
         })
     activity.sort(key=lambda x: x['time'], reverse=True)
 
+    payment_methods_qs = payments_today.aggregate(
+        efectivo=Sum('total', filter=Q(method='cash')),
+        tarjeta=Sum('total', filter=Q(method='cardnet')),
+        transferencia=Sum('total', filter=Q(method='tpago')),
+        yape=Sum('total', filter=Q(method='mixed')),
+    )
+    payment_methods = {
+        'efectivo': float(payment_methods_qs['efectivo'] or 0),
+        'tarjeta': float(payment_methods_qs['tarjeta'] or 0),
+        'transferencia': float(payment_methods_qs['transferencia'] or 0),
+        'yape': float(payment_methods_qs['yape'] or 0),
+    }
+
     return Response({
         'ventas_hoy': float(totals['total_ventas']),
         'itbis_hoy': float(totals['total_itbis']),
@@ -97,4 +110,5 @@ def dashboard(request):
         'ncf_sequences': list(ncf_sequences),
         'hourly_orders': hourly,
         'activity': activity[:20],
+        'payment_methods': payment_methods,
     })

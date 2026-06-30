@@ -248,3 +248,34 @@ body {
   background: var(--color-muted);
   border-radius: 3px;
 }
+
+/* Modo Sol: Contraste extremo para pantallas al aire libre bajo el sol de Samaná */
+.sol-mode {
+  --color-background: #ffffff !important;
+  --color-foreground: #000000 !important;
+  --color-card: #ffffff !important;
+  --color-card-foreground: #000000 !important;
+  --color-popover: #ffffff !important;
+  --color-popover-foreground: #000000 !important;
+  --color-primary: #003759 !important; /* Azul petróleo de alto contraste */
+  --color-primary-foreground: #ffffff !important;
+  --color-secondary: #f1f5f9 !important;
+  --color-secondary-foreground: #000000 !important;
+  --color-muted: #cbd5e1 !important;
+  --color-muted-foreground: #0f172a !important;
+  --color-accent: #92400e !important; /* Dorado oscuro de alto contraste */
+  --color-accent-foreground: #ffffff !important;
+  --color-border: #334155 !important; /* Bordes muy definidos */
+  --color-input: #ffffff !important;
+  --color-ring: #000000 !important;
+  
+  /* Eliminar sombras suaves para favorecer trazos sólidos */
+  --shadow-sm: none !important;
+  --shadow-md: none !important;
+  --shadow-lg: none !important;
+  --shadow-xl: none !important;
+}
+
+.sol-mode * {
+  border-color: var(--color-border) !important;
+}
