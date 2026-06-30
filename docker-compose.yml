@@ -1,0 +1,71 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  django:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - static_volume:/app/static
+      - media_volume:/app/media
+      - certs_volume:/app/certs
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    command: python manage.py run_worker
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      django:
+        condition: service_started
+
+  recovery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    command: python manage.py recovery_worker
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      django:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
+  certs_volume:
