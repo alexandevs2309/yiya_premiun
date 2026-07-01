@@ -1,5 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
-import { Card, CardContent } from '@/components/ui/card'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -7,17 +6,52 @@ import { useAppStore } from '@/stores/app-store'
 import { useNavigationStore } from '@/stores/navigation-store'
 import { menu as menuApi, orders as ordersApi, tables } from '@/services/api'
 import { formatCurrency, cn } from '@/lib/utils'
-import { Search, ShoppingCart, Send, CreditCard, Plus, Minus, Trash2, ArrowLeft, ChevronDown, UtensilsCrossed } from 'lucide-react'
-import type { MenuItem, ModifierGroup, ModifierOption } from '@/types'
+import {
+  Search, ShoppingCart, Send, CreditCard, Plus,
+  Minus, Trash2, ArrowLeft, UtensilsCrossed, X,
+} from 'lucide-react'
+import type { MenuItem, ModifierGroup, ModifierOption, OrderItem } from '@/types'
+
+const CATEGORY_COLORS: Record<string, { bg: string; border: string; text: string; active: string }> = {
+  Entradas: { bg: 'bg-[var(--coral)]/10', border: 'border-[var(--coral)]/30', text: 'text-[var(--coral)]', active: 'bg-[var(--coral)] text-white' },
+  Pescados: { bg: 'bg-[var(--caribe)]/10', border: 'border-[var(--caribe)]/30', text: 'text-[var(--caribe)]', active: 'bg-[var(--caribe)] text-white' },
+  Mariscos: { bg: 'bg-[var(--samana)]/10', border: 'border-[var(--samana)]/30', text: 'text-[var(--samana)]', active: 'bg-[var(--samana)] text-white' },
+  Criolla: { bg: 'bg-[var(--sol)]/10', border: 'border-[var(--sol)]/30', text: 'text-[var(--sol)]', active: 'bg-[var(--sol)] text-white' },
+  Bebidas: { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-400', active: 'bg-purple-500 text-white' },
+  Postres: { bg: 'bg-pink-500/10', border: 'border-pink-500/30', text: 'text-pink-400', active: 'bg-pink-500 text-white' },
+}
+
+const DEFAULT_CAT_COLOR = { bg: 'bg-muted', border: 'border-border', text: 'text-muted-foreground', active: 'bg-foreground text-background' }
+
+function getCatColor(name: string) {
+  return CATEGORY_COLORS[name] || DEFAULT_CAT_COLOR
+}
+
+function highlightText(text: string, query: string) {
+  if (!query) return text
+  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'))
+  return parts.map((part, i) =>
+    part.toLowerCase() === query.toLowerCase()
+      ? <mark key={i} className="bg-[var(--caribe)]/20 text-inherit rounded-sm px-0.5">{part}</mark>
+      : part,
+  )
+}
+
+function getTimerDot(elapsed: number) {
+  if (elapsed < 45) return 'bg-[var(--samana)]'
+  if (elapsed < 90) return 'bg-[var(--sol)]'
+  return 'bg-[var(--coral)]'
+}
 
 export function POSPage() {
-  const { activeTableId, activeOrderId, menuItems, setMenuItems } = useAppStore()
+  const { activeTableId, activeOrderId, menuItems, setMenuItems, tables: storeTables } = useAppStore()
   const setActiveModule = useNavigationStore((s) => s.setActiveModule)
   const [cat, setCat] = useState('')
   const [search, setSearch] = useState('')
   const [order, setOrder] = useState<import('@/types').Order | null>(null)
   const [modItem, setModItem] = useState<MenuItem | null>(null)
   const [selections, setSelections] = useState<Record<number, ModifierOption[]>>({})
+  const searchRef = useRef<HTMLInputElement>(null)
 
   const fetchOrder = useCallback(async () => {
     if (!activeOrderId) return
@@ -40,6 +74,11 @@ export function POSPage() {
     (i) => i.is_available && (!cat || i.category_name === cat) &&
       (!search || i.name.toLowerCase().includes(search.toLowerCase())),
   )
+
+  const cartItemCounts: Record<number, number> = {}
+  order?.items.forEach((i) => {
+    if (i.menu_item !== null) cartItemCounts[i.menu_item] = (cartItemCounts[i.menu_item] || 0) + i.quantity
+  })
 
   const openModifiers = (item: MenuItem) => {
     if (!item.has_modifiers || !item.modifier_groups?.length) {
@@ -134,6 +173,8 @@ export function POSPage() {
   const propina = subtotal * 0.10
   const total = subtotal + itbis + propina
 
+  const tableInfo = storeTables.find((t) => t.id === activeTableId)
+
   if (!activeTableId || !activeOrderId) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -156,162 +197,203 @@ export function POSPage() {
       <div className="flex-1 p-4 space-y-4 overflow-auto">
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input type="text" placeholder="Buscar plato..."
+          <input ref={searchRef} type="text" placeholder="Buscar plato..."
             value={search} onChange={(e) => setSearch(e.target.value)}
-            className="w-full h-10 pl-10 pr-3 rounded-lg bg-input border border-border text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all" />
+            className="w-full h-10 pl-10 pr-9 rounded-lg bg-input border border-border text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-[var(--caribe)]/20 focus:border-[var(--caribe)] transition-all" />
+          {search && (
+            <button onClick={() => { setSearch(''); searchRef.current?.focus() }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
-        <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1">
-          {categories.map((c) => (
-            <Button key={c} variant={cat === c ? 'default' : 'outline'} size="sm"
-              onClick={() => setCat(c)} className="text-xs whitespace-nowrap shrink-0 rounded-full">{c}</Button>
-          ))}
+        <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 pb-1 scrollbar-none">
+          {categories.map((c) => {
+            const cc = getCatColor(c)
+            return (
+              <button key={c}
+                onClick={() => setCat(cat === c ? '' : c)}
+                className={cn(
+                  'shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all duration-100 whitespace-nowrap',
+                  cat === c ? `${cc.active} border-transparent font-semibold` : `${cc.bg} ${cc.border} ${cc.text} hover:brightness-95`,
+                )}>
+                {c}
+              </button>
+            )
+          })}
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {filtered.map((item) => (
-            <motion.div key={item.id} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-              <Card className="cursor-pointer hover:border-primary/30 transition-colors" onClick={() => openModifiers(item)}>
-                <CardContent className="p-3">
-                  <div className="h-20 rounded-lg bg-gradient-to-br from-secondary/50 to-secondary/20 flex items-center justify-center mb-2">
+          {filtered.map((item) => {
+            const price = item.effective_price ? parseFloat(item.effective_price as any) : item.price
+            const inCart = cartItemCounts[item.id] || 0
+
+            return (
+              <motion.div key={item.id} layout
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                whileHover={{ y: -2 }}
+                transition={{ duration: 0.15 }}
+                className="relative">
+                <div
+                  onClick={() => openModifiers(item)}
+                  className={cn(
+                    'rounded-xl bg-card border cursor-pointer overflow-hidden transition-all duration-150',
+                    'hover:shadow-lg',
+                    inCart > 0 ? 'border-[var(--caribe)]/60' : 'border-border',
+                  )}
+                >
+                  <div className="h-24 bg-gradient-to-b from-muted/40 to-muted/10 flex items-center justify-center">
                     {item.image ? (
-                      <img src={item.image} alt={item.name} className="w-full h-full object-cover rounded-lg" />
+                      <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
                     ) : (
-                      <span className="text-2xl opacity-40">🍽️</span>
+                      <UtensilsCrossed className="w-5 h-5 text-muted-foreground/30" />
                     )}
                   </div>
-                  <p className="text-sm font-medium truncate">{item.name}</p>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-sm font-bold text-primary">
-                      {formatCurrency(item.effective_price ? parseFloat(item.effective_price as any) : item.price)}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {item.itbis_type === 'gravado' && (
-                        <Badge variant="secondary" className="text-[9px] px-1">ITBIS</Badge>
-                      )}
-                      {item.has_modifiers && (
-                        <Badge variant="outline" className="text-[9px] px-1">+</Badge>
+
+                  <div className="p-3 pt-2.5">
+                    <p className="text-[13px] font-semibold truncate leading-tight">
+                      {search ? highlightText(item.name, search) : item.name}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate mt-0.5">{item.category_name}</p>
+
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[15px] font-bold text-[var(--caribe)] tabular-nums leading-none">
+                          {formatCurrency(price)}
+                        </span>
+                        {item.itbis_type === 'gravado' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border leading-none">
+                            ITBIS
+                          </span>
+                        )}
+                      </div>
+
+                      {inCart === 0 ? (
+                        <motion.button
+                          whileHover={{ scale: 1.15 }}
+                          whileTap={{ scale: 0.8 }}
+                          onClick={(e) => { e.stopPropagation(); openModifiers(item) }}
+                          className="w-7 h-7 rounded-full bg-[var(--caribe)] text-white flex items-center justify-center text-lg leading-none shadow-sm hover:shadow-md transition-shadow"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </motion.button>
+                      ) : (
+                        <motion.span
+                          key={inCart}
+                          initial={{ scale: 0.5 }}
+                          animate={{ scale: 1 }}
+                          className="px-1.5 py-0.5 rounded-full bg-[var(--caribe)] text-white text-[11px] font-bold leading-none"
+                        >
+                          {inCart}
+                        </motion.span>
                       )}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
+                </div>
+              </motion.div>
+            )
+          })}
         </div>
       </div>
 
       <div className="w-80 border-l bg-card flex flex-col">
-        <div className="p-4 border-b space-y-1 bg-muted/20">
+        <div className="p-4 border-b border-border space-y-0.5">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-sm">
-              Mesa {order?.table_number || activeTableId}
-            </h3>
-            {order?.status === 'open' && (
-              <Badge variant="secondary" className="text-[9px]">Abierta</Badge>
-            )}
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[var(--samana)]" />
+              <h3 className="text-base font-bold leading-none">Mesa {order?.table_number || activeTableId}</h3>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {order?.items.length || 0} item(s) · {order?.guests || 1} comensal(es)
+          <p className="text-xs text-muted-foreground pl-4">
+            {order?.items.length || 0} items · {order?.guests || 1} comensal(es)
           </p>
         </div>
 
-        <div className="flex-1 overflow-auto p-3 space-y-1.5">
+        <div className="flex-1 overflow-auto p-3 space-y-1">
           <AnimatePresence initial={false}>
             {order?.items.map((item) => (
-              <motion.div key={item.id} layout initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="flex items-center gap-2 p-2 rounded-lg bg-secondary/10 hover:bg-secondary/20 transition-colors group">
-                <div className="flex flex-col items-center gap-0.5">
-                  <button onClick={() => updateQty(item.id, 1)}
-                    className="w-5 h-5 flex items-center justify-center rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors">
-                    <Plus className="w-3 h-3" />
-                  </button>
-                  <span className="text-xs font-semibold w-5 text-center">{item.quantity}</span>
-                  <button onClick={() => updateQty(item.id, -1)}
-                    className="w-5 h-5 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors">
-                    <Minus className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{item.name}</p>
-                  <span className="text-[11px] text-muted-foreground">{formatCurrency(item.price)}</span>
-                  {item.modifiers_json.length > 0 && (
-                    <p className="text-[10px] text-muted-foreground truncate">
-                      {item.modifiers_json.map((m) => m.name).join(', ')}
-                    </p>
-                  )}
-                </div>
-                <button onClick={() => removeItem(item.id)}
-                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all shrink-0">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </motion.div>
+              <CartItemRow key={item.id} item={item}
+                onIncrement={() => updateQty(item.id, 1)}
+                onDecrement={() => updateQty(item.id, -1)}
+                onRemove={() => removeItem(item.id)} />
             ))}
           </AnimatePresence>
+
           {(!order?.items || order.items.length === 0) && (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-3">
-                <UtensilsCrossed className="w-6 h-6 opacity-40" />
-              </div>
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <ShoppingCart className="w-10 h-10 text-muted-foreground/20 mb-4" />
               <p className="text-sm font-medium">Carrito vacío</p>
-              <p className="text-xs text-muted-foreground/60">Selecciona platos del menú</p>
+              <p className="text-xs text-muted-foreground/60 mt-0.5">Selecciona platos del menú</p>
             </div>
           )}
         </div>
 
-        <div className="p-4 border-t space-y-2 bg-muted/10">
+        <div className="p-4 pt-3 border-t border-border bg-muted/20 space-y-1.5">
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Subtotal</span>
-            <span>{formatCurrency(subtotal)}</span>
+            <span className="tabular-nums">{formatCurrency(subtotal)}</span>
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>ITBIS (18%)</span>
-            <span>{formatCurrency(itbis)}</span>
+            <span className="tabular-nums">{formatCurrency(itbis)}</span>
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Propina (10%)</span>
-            <span>{formatCurrency(propina)}</span>
+            <span className="tabular-nums">{formatCurrency(propina)}</span>
           </div>
-          <div className="flex justify-between font-bold text-base pt-2 border-t">
+          <div className="h-px bg-border my-1" />
+          <div className="flex justify-between text-base font-bold">
             <span>Total</span>
-            <span className="text-primary">{formatCurrency(total)}</span>
+            <span className="text-[var(--caribe)] tabular-nums">{formatCurrency(total)}</span>
           </div>
 
-          <div className="flex gap-2 pt-2">
+          <div className="flex flex-col gap-2 pt-3">
             {order && order.items.length > 0 && order.status === 'open' && (
-              <Button size="sm" className="flex-1 gap-1 text-xs"
+              <Button size="sm" className="flex-1 gap-1.5 text-xs h-9"
                 onClick={async () => {
                   if (!activeOrderId) return
                   await ordersApi.sendToKitchen(activeOrderId)
                   setActiveModule('kds')
                 }}>
-                <Send className="w-3 h-3" /> Enviar a cocina
+                <Send className="w-3.5 h-3.5" /> Enviar a cocina
               </Button>
             )}
-            <Button size="sm" variant="secondary" className="flex-1 gap-1 text-xs"
-              onClick={async () => {
-                if (!activeTableId) return
-                await tables.requestBill(activeTableId)
-                setActiveModule('cashier')
-              }}>
-              Pedir cuenta
-            </Button>
-            <Button size="sm" variant="default" className="flex-1 gap-1 text-xs bg-success hover:brightness-110 text-primary-foreground"
-              onClick={() => setActiveModule('cashier')}>
-              <CreditCard className="w-3 h-3" /> Cobrar
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1 gap-1.5 text-xs h-9"
+                disabled={!order?.items.length}
+                onClick={async () => {
+                  if (!activeTableId) return
+                  await tables.requestBill(activeTableId)
+                  setActiveModule('cashier')
+                }}>
+                Pedir cuenta
+              </Button>
+              <Button size="sm" className="flex-1 gap-1.5 text-xs h-10 font-semibold bg-[var(--caribe)] text-white hover:brightness-110"
+                disabled={!order?.items.length}
+                onClick={() => setActiveModule('cashier')}>
+                <CreditCard className="w-3.5 h-3.5" /> Cobrar
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
       {modItem && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center"
+          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
           onClick={() => setModItem(null)}>
-          <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }}
-            className="bg-card border rounded-xl p-6 w-full max-w-md mx-4 max-h-[80vh] overflow-auto"
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            className="bg-card border rounded-xl p-6 w-full max-w-md max-h-[80vh] overflow-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold text-lg mb-1">{modItem.name}</h3>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-semibold text-lg">{modItem.name}</h3>
+              <button onClick={() => setModItem(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
             <p className="text-sm text-muted-foreground mb-4">{formatCurrency(modItem.price)}</p>
 
             {modItem.modifier_groups?.map((group) => (
@@ -335,7 +417,7 @@ export function POSPage() {
                         onClick={() => toggleModOption(group.id, opt)}
                         className={cn(
                           'flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-all',
-                          selected ? 'bg-primary/10 border border-primary/20' : 'bg-secondary/20 hover:bg-secondary/30',
+                          selected ? 'bg-[var(--caribe)]/10 border border-[var(--caribe)]/20' : 'bg-muted/30 hover:bg-muted/50',
                         )}>
                         <span className="text-sm">{opt.name}</span>
                         {opt.price_adjustment > 0 && (
@@ -348,7 +430,7 @@ export function POSPage() {
               </div>
             ))}
 
-            <div className="flex gap-2 mt-4">
+            <div className="flex gap-2 mt-4 pt-3 border-t border-border">
               <Button variant="outline" className="flex-1" onClick={() => setModItem(null)}>Cancelar</Button>
               <Button className="flex-1" onClick={confirmModifiers}>
                 Agregar ({formatCurrency(modItem.price + Object.values(selections).flat().reduce((s, o) => s + o.price_adjustment, 0))})
@@ -358,5 +440,51 @@ export function POSPage() {
         </motion.div>
       )}
     </div>
+  )
+}
+
+function CartItemRow({ item, onIncrement, onDecrement, onRemove }: {
+  item: OrderItem; onIncrement: () => void; onDecrement: () => void; onRemove: () => void
+}) {
+  const hasModifiers = item.modifiers_json.length > 0
+
+  return (
+    <motion.div layout initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20, height: 0 }} transition={{ duration: 0.15 }}
+      className="group flex items-start gap-3 p-2.5 rounded-xl hover:bg-muted/20 transition-colors">
+      <div className="w-9 h-9 rounded-lg bg-muted/30 flex items-center justify-center shrink-0 mt-0.5">
+        <UtensilsCrossed className="w-4 h-4 text-muted-foreground/30" />
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-xs font-semibold truncate leading-tight">{item.name}</span>
+          <span className="text-xs font-semibold tabular-nums shrink-0">{formatCurrency(item.price)}</span>
+        </div>
+        {hasModifiers && (
+          <p className="text-[10px] text-[var(--coral)] truncate mt-0.5 leading-tight">
+            {item.modifiers_json.map((m) => m.name).join(', ')}
+          </p>
+        )}
+        <div className="flex items-center gap-2 mt-1.5">
+          <div className="flex items-center gap-1">
+            <button onClick={onDecrement}
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+              <Minus className="w-3 h-3" />
+            </button>
+            <span className="text-xs font-semibold w-5 text-center tabular-nums">{item.quantity}</span>
+            <button onClick={onIncrement}
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button onClick={onRemove}
+        className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-[var(--coral)]/10 text-[var(--coral)]/60 hover:text-[var(--coral)] transition-all shrink-0 mt-0.5">
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </motion.div>
   )
 }

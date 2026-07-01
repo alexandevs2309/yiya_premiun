@@ -3,9 +3,10 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   LayoutDashboard, Grid3X3, ShoppingCart, ChefHat, DollarSign,
-  FileText, Package, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Shell,
+  FileText, Package, Users, BarChart3, Settings,
+  ChevronLeft, ChevronRight, Shell,
 } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { useState } from 'react'
 
 interface NavItem {
@@ -36,24 +37,28 @@ export function Sidebar() {
       layout
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
       className={cn(
-        'flex flex-col border-r bg-sidebar h-screen sticky top-0',
+        'flex flex-col border-r bg-sidebar h-screen sticky top-0 z-30',
         collapsed ? 'w-[68px]' : 'w-[240px]',
       )}
     >
       <div className="flex items-center gap-2 px-4 h-14 border-b border-border">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground shadow-sm">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground shadow-sm shadow-primary/30">
             <Shell className="w-4 h-4" />
           </div>
           {!collapsed && (
-            <motion.span
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="font-semibold text-sm tracking-tight text-sidebar-foreground"
             >
-              D'Yiya POS
-            </motion.span>
+              <span className="font-semibold text-sm tracking-tight text-sidebar-foreground block leading-tight">
+                D'Yiya
+              </span>
+              <span className="text-[10px] text-muted-foreground font-normal">
+                Restaurant POS
+              </span>
+            </motion.div>
           )}
         </div>
       </div>
@@ -71,14 +76,23 @@ export function Sidebar() {
                 'w-full justify-start gap-3 text-sm font-medium transition-all rounded-lg',
                 collapsed && 'justify-center px-0',
                 isActive
-                  ? 'bg-primary/10 text-foreground border-l-[3px] border-primary rounded-l-none'
-                  : 'text-sidebar-foreground hover:text-foreground hover:bg-accent/50',
+                  ? 'bg-primary/10 text-sidebar-foreground border-l-[3px] border-primary rounded-l-none shadow-sm'
+                  : 'text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-primary/5',
               )}
               onClick={() => setActiveModule(item.id)}
             >
-              <Icon className={cn('w-4 h-4 shrink-0', isActive ? 'text-primary' : '')} />
+              <Icon
+                className={cn(
+                  'w-4 h-4 shrink-0 transition-colors',
+                  isActive ? 'text-primary' : 'text-sidebar-foreground/50',
+                )}
+              />
               {!collapsed && (
-                <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.span
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
                   {item.label}
                 </motion.span>
               )}
@@ -91,7 +105,7 @@ export function Sidebar() {
         <Button
           variant="ghost"
           size={collapsed ? 'icon' : 'sm'}
-          className="w-full justify-center text-sidebar-foreground hover:text-foreground"
+          className="w-full justify-center text-sidebar-foreground/50 hover:text-sidebar-foreground"
           onClick={() => setCollapsed(!collapsed)}
         >
           {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}

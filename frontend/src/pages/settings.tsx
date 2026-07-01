@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { InputField } from '@/components/ui/input-field'
+import { CardSkeleton } from '@/components/ui/skeleton'
 import type { User, Table, MenuItem, MenuCategory, UserRole } from '@/types'
 
 type Tab = 'users' | 'menu' | 'tables' | 'ncf' | 'audit' | 'employees' | 'sistema'
@@ -57,13 +58,17 @@ export function SettingsPage() {
         })}
       </div>
       <div className="flex-1 p-6 overflow-auto">
-        {tab === 'users' && <UsersTab />}
-        {tab === 'menu' && <MenuTab />}
-        {tab === 'tables' && <TablesTab />}
-        {tab === 'employees' && <EmployeesTab />}
-        {tab === 'ncf' && <NCFTab />}
-        {tab === 'audit' && <AuditTab />}
-        {tab === 'sistema' && <SistemaTab />}
+        <AnimatePresence mode="wait">
+          <motion.div key={tab} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={{ duration: 0.12 }}>
+            {tab === 'users' && <UsersTab />}
+            {tab === 'menu' && <MenuTab />}
+            {tab === 'tables' && <TablesTab />}
+            {tab === 'employees' && <EmployeesTab />}
+            {tab === 'ncf' && <NCFTab />}
+            {tab === 'audit' && <AuditTab />}
+            {tab === 'sistema' && <SistemaTab />}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </motion.div>
   )
@@ -116,7 +121,7 @@ function UsersTab() {
 
   const roleColors: Record<string, string> = { admin: 'destructive', cashier: 'default', waiter: 'secondary', cook: 'outline' }
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (loading) return <div className="p-4 space-y-3">{Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} className="h-12" />)}</div>
 
   return (
     <div className="space-y-4">
@@ -322,7 +327,7 @@ function MenuTab() {
     await fetch()
   }
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (loading) return <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} className="h-32" />)}</div>
 
   return (
     <div className="space-y-4">
@@ -536,7 +541,7 @@ function TablesTab() {
   const baseUrl = window.location.origin
   const kioskUrl = (token: string) => `${baseUrl}/kiosk?token=${token}`
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (loading) return <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <CardSkeleton key={i} className="h-12" />)}</div>
 
   return (
     <div className="space-y-4">
@@ -636,7 +641,7 @@ function NCFTab() {
 
   useEffect(() => { fetch() }, [])
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (loading) return <div className="space-y-3">{Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} className="h-12" />)}</div>
 
   return (
     <div className="space-y-4">
@@ -692,7 +697,7 @@ function AuditTab() {
 
   const actionIcons: Record<string, React.ElementType> = { create: Plus, update: RefreshCw, delete: Trash2, login: UserCircle, payment: Loader2 }
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (loading) return <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <CardSkeleton key={i} className="h-16" />)}</div>
 
   return (
     <div className="space-y-4">
@@ -742,7 +747,7 @@ function SistemaTab() {
     )
   }, [])
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (loading) return <div className="space-y-3"><CardSkeleton className="h-48" /><CardSkeleton className="h-24" /></div>
 
   return (
     <div className="space-y-4">

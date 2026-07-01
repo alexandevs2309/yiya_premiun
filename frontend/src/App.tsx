@@ -1,48 +1,49 @@
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { useAppStore } from '@/stores/app-store'
 import { useNavigationStore } from '@/stores/navigation-store'
 import { useThemeStore, applyTheme } from '@/stores/theme-store'
 import { LoginPage } from '@/pages/login'
-import { FloorPlanPage } from '@/pages/floor-plan'
-import { POSPage } from '@/pages/pos'
-import { KDSPage } from '@/pages/kds'
-import { CashierPage } from '@/pages/cashier'
-import { InvoicingPage } from '@/pages/invoicing'
-import { DashboardPage } from '@/pages/dashboard'
-import { SettingsPage } from '@/pages/settings'
-import { InventoryPage } from '@/pages/inventory'
-import { CustomersPage } from '@/pages/customers'
-import { ReportsPage } from '@/pages/reports'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
 import { motion, AnimatePresence } from 'framer-motion'
-import { cn } from '@/lib/utils'
+import { ToastContainer } from '@/components/ui/toast'
 
-const pages: Record<string, React.ReactNode> = {
-  dashboard: <DashboardPage />,
-  'floor-plan': <FloorPlanPage />,
-  pos: <POSPage />,
-  kds: <KDSPage />,
-  cashier: <CashierPage />,
-  invoicing: <InvoicingPage />,
-  settings: <SettingsPage />,
-  inventory: <InventoryPage />,
-  customers: <CustomersPage />,
-  reports: <ReportsPage />,
+const FloorPlanPage = lazy(() => import('@/pages/floor-plan').then(m => ({ default: m.FloorPlanPage })))
+const POSPage = lazy(() => import('@/pages/pos').then(m => ({ default: m.POSPage })))
+const KDSPage = lazy(() => import('@/pages/kds').then(m => ({ default: m.KDSPage })))
+const CashierPage = lazy(() => import('@/pages/cashier').then(m => ({ default: m.CashierPage })))
+const InvoicingPage = lazy(() => import('@/pages/invoicing').then(m => ({ default: m.InvoicingPage })))
+const DashboardPage = lazy(() => import('@/pages/dashboard').then(m => ({ default: m.DashboardPage })))
+const SettingsPage = lazy(() => import('@/pages/settings').then(m => ({ default: m.SettingsPage })))
+const InventoryPage = lazy(() => import('@/pages/inventory').then(m => ({ default: m.InventoryPage })))
+const CustomersPage = lazy(() => import('@/pages/customers').then(m => ({ default: m.CustomersPage })))
+const ReportsPage = lazy(() => import('@/pages/reports').then(m => ({ default: m.ReportsPage })))
+
+const pages: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+  dashboard: DashboardPage,
+  'floor-plan': FloorPlanPage,
+  pos: POSPage,
+  kds: KDSPage,
+  cashier: CashierPage,
+  invoicing: InvoicingPage,
+  settings: SettingsPage,
+  inventory: InventoryPage,
+  customers: CustomersPage,
+  reports: ReportsPage,
 }
 
-function PlaceholderPage({ title }: { title: string }) {
+function PageLoader() {
   return (
-    <div className="flex-1 flex items-center justify-center text-muted-foreground">
-      <p className="text-lg">{title} — Próximamente</p>
+    <div className="flex-1 flex items-center justify-center">
+      <div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
     </div>
   )
 }
 
 function POSLayout() {
-  const { solMode } = useAppStore()
   const { activeModule } = useNavigationStore()
-  const theme = useThemeStore((s) => s.theme)
+  const { theme } = useThemeStore()
+  const Page = pages[activeModule]
 
   useEffect(() => { applyTheme(theme) }, [theme])
 
@@ -52,8 +53,9 @@ function POSLayout() {
   }, [activeModule])
 
   return (
-    <div className={cn('flex h-screen overflow-hidden', solMode && 'sol-mode')}>
+    <div className="flex h-screen overflow-hidden">
       <Sidebar />
+      <ToastContainer />
       <div className="flex-1 flex flex-col min-w-0">
         <Header />
         <main className="flex-1 overflow-auto">
@@ -66,7 +68,13 @@ function POSLayout() {
               transition={{ duration: 0.15 }}
               className="h-full"
             >
-              {pages[activeModule] || <PlaceholderPage title={activeModule} />}
+              <Suspense fallback={<PageLoader />}>
+                {Page ? <Page /> : (
+                  <div className="flex-1 flex items-center justify-center text-muted-foreground">
+                    <p className="text-lg">{activeModule} — Próximamente</p>
+                  </div>
+                )}
+              </Suspense>
             </motion.div>
           </AnimatePresence>
         </main>

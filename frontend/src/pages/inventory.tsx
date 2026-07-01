@@ -5,20 +5,40 @@ import { Badge } from '@/components/ui/badge'
 import { InputField } from '@/components/ui/input-field'
 import { Modal } from '@/components/ui/modal'
 import { inventory } from '@/services/api'
-import { formatCurrency } from '@/lib/utils'
-import { motion } from 'framer-motion'
+import { formatCurrency, cn } from '@/lib/utils'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Package, Truck, Plus, RefreshCw, Pencil, Trash2, Loader2,
-  AlertTriangle, Search,
+  AlertTriangle, Search, AlertCircle,
 } from 'lucide-react'
+import { CardSkeleton } from '@/components/ui/skeleton'
 import type { InventoryItem, PurchaseOrder } from '@/types'
 
 const categories = ['Todos', 'Carnes', 'Verduras', 'Lácteos', 'Bebidas', 'Panadería', 'Limpieza', 'Otros']
 const units = ['unidad', 'kg', 'lb', 'g', 'L', 'ml', 'caja', 'paquete']
 
+function TableSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="space-y-2 p-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex gap-4">
+          <CardSkeleton className="h-5 flex-1" />
+          <CardSkeleton className="h-5 w-20" />
+          <CardSkeleton className="h-5 w-16" />
+          <CardSkeleton className="h-5 w-16" />
+          <CardSkeleton className="h-5 w-20" />
+          <CardSkeleton className="h-5 w-24" />
+          <CardSkeleton className="h-5 w-16" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ItemsTab() {
   const [items, setItems] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [category, setCategory] = useState('Todos')
   const [search, setSearch] = useState('')
   const [editItem, setEditItem] = useState<InventoryItem | null>(null)
@@ -27,7 +47,8 @@ function ItemsTab() {
 
   const fetch = async () => {
     setLoading(true)
-    const data = await inventory.items.list().catch(() => [])
+    setError(false)
+    const data = await inventory.items.list().catch(() => { setError(true); return [] })
     setItems(data)
     setLoading(false)
   }
@@ -67,7 +88,17 @@ function ItemsTab() {
     await fetch()
   }
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (error) {
+    return (
+      <div className="flex flex-col items-center py-12 text-muted-foreground">
+        <AlertCircle className="w-10 h-10 text-destructive/50 mb-3" />
+        <p className="text-sm font-medium">Error al cargar items</p>
+        <Button size="sm" variant="outline" onClick={fetch} className="gap-1 mt-3">
+          <RefreshCw className="w-3 h-3" /> Reintentar
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -81,7 +112,7 @@ function ItemsTab() {
 
       <div className="flex gap-2 flex-wrap">
         {categories.map((c) => (
-          <Badge key={c} variant={category === c ? 'default' : 'outline'} className="cursor-pointer" onClick={() => setCategory(c)}>{c}</Badge>
+          <Badge key={c} variant={category === c ? 'default' : 'outline'} className="cursor-pointer transition-all" onClick={() => setCategory(c)}>{c}</Badge>
         ))}
       </div>
 
@@ -94,45 +125,63 @@ function ItemsTab() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground text-xs">
-                <th className="text-left p-3 font-medium">Item</th>
-                <th className="text-left p-3 font-medium">Categoría</th>
-                <th className="text-left p-3 font-medium">Stock</th>
-                <th className="text-left p-3 font-medium">Stock Mín.</th>
-                <th className="text-left p-3 font-medium">Costo/Unit</th>
-                <th className="text-left p-3 font-medium">Valor Total</th>
-                <th className="text-right p-3 font-medium">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((item) => (
-                <tr key={item.id} className={`border-b last:border-0 hover:bg-muted/30 ${item.is_low ? 'bg-destructive/5' : ''}`}>
-                  <td className="p-3 font-medium">{item.name}</td>
-                  <td className="p-3"><Badge variant="secondary" className="text-[9px]">{item.category}</Badge></td>
-                  <td className="p-3">
-                    <span className={item.is_low ? 'text-destructive font-semibold flex items-center gap-1' : ''}>
-                      {item.is_low && <AlertTriangle className="w-3 h-3" />}
-                      {item.stock} {item.unit}
-                    </span>
-                  </td>
-                  <td className="p-3 text-muted-foreground">{item.min_stock} {item.unit}</td>
-                  <td className="p-3">{formatCurrency(item.cost_per_unit)}</td>
-                  <td className="p-3 font-mono text-xs">{formatCurrency(item.total_value)}</td>
-                  <td className="p-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => openEdit(item)}><Pencil className="w-3 h-3" /></Button>
-                      <Button variant="ghost" size="icon" className="w-7 h-7 text-destructive" onClick={() => remove(item)}><Trash2 className="w-3 h-3" /></Button>
-                    </div>
-                  </td>
+          {loading ? <TableSkeleton /> : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground text-xs">
+                  <th className="text-left p-3 font-medium">Item</th>
+                  <th className="text-left p-3 font-medium">Categoría</th>
+                  <th className="text-left p-3 font-medium">Stock</th>
+                  <th className="text-left p-3 font-medium">Stock Mín.</th>
+                  <th className="text-left p-3 font-medium">Costo/Unit</th>
+                  <th className="text-left p-3 font-medium">Valor Total</th>
+                  <th className="text-right p-3 font-medium">Acción</th>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={7} className="text-center p-8 text-muted-foreground text-sm">Sin items de inventario</td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filtered.map((item) => {
+                  const stockPct = item.min_stock > 0 ? Math.min(100, (item.stock / item.min_stock) * 100) : 100
+                  const isLow = stockPct <= 100
+                  return (
+                    <motion.tr key={item.id} layout
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                      className={cn('border-b last:border-0 hover:bg-muted/30 transition-colors', item.is_low && 'bg-destructive/5')}>
+                      <td className="p-3 font-medium">{item.name}</td>
+                      <td className="p-3"><Badge variant="secondary" className="text-[9px]">{item.category}</Badge></td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                          <span className={cn(item.is_low && 'text-destructive font-semibold flex items-center gap-1')}>
+                            {item.is_low && <AlertTriangle className="w-3 h-3 shrink-0" />}
+                            {item.stock} {item.unit}
+                          </span>
+                          <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div className={cn('h-full rounded-full transition-all duration-500', stockPct <= 50 ? 'bg-[var(--coral)]' : 'bg-[var(--samana)]')}
+                              style={{ width: `${Math.min(100, stockPct)}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-3 text-muted-foreground">{item.min_stock} {item.unit}</td>
+                      <td className="p-3">{formatCurrency(item.cost_per_unit)}</td>
+                      <td className="p-3 font-mono text-xs">{formatCurrency(item.total_value)}</td>
+                      <td className="p-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => openEdit(item)}><Pencil className="w-3 h-3" /></Button>
+                          <Button variant="ghost" size="icon" className="w-7 h-7 text-destructive" onClick={() => remove(item)}><Trash2 className="w-3 h-3" /></Button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  )
+                })}
+                {filtered.length === 0 && !loading && (
+                  <tr><td colSpan={7} className="text-center p-8 text-muted-foreground text-sm">
+                    <Package className="w-8 h-8 mx-auto mb-2 text-muted-foreground/20" />
+                    Sin items de inventario
+                    <br /><Button variant="link" size="sm" className="mt-1" onClick={openCreate}>Crear primer item</Button>
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          )}
         </CardContent>
       </Card>
 
@@ -174,13 +223,15 @@ function ItemsTab() {
 function PurchaseOrdersTab() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [editOrder, setEditOrder] = useState<PurchaseOrder | null>(null)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ supplier: '', notes: '' })
 
   const fetch = async () => {
     setLoading(true)
-    const data = await inventory.purchaseOrders.list().catch(() => [])
+    setError(false)
+    const data = await inventory.purchaseOrders.list().catch(() => { setError(true); return [] })
     setOrders(data)
     setLoading(false)
   }
@@ -220,7 +271,17 @@ function PurchaseOrdersTab() {
 
   const statusColors: Record<string, string> = { pending: 'secondary', partial: 'default', completed: 'default', cancelled: 'destructive' }
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (error) {
+    return (
+      <div className="flex flex-col items-center py-12 text-muted-foreground">
+        <AlertCircle className="w-10 h-10 text-destructive/50 mb-3" />
+        <p className="text-sm font-medium">Error al cargar órdenes de compra</p>
+        <Button size="sm" variant="outline" onClick={fetch} className="gap-1 mt-3">
+          <RefreshCw className="w-3 h-3" /> Reintentar
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -233,47 +294,54 @@ function PurchaseOrdersTab() {
       </div>
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground text-xs">
-                <th className="text-left p-3 font-medium">#</th>
-                <th className="text-left p-3 font-medium">Proveedor</th>
-                <th className="text-left p-3 font-medium">Estado</th>
-                <th className="text-left p-3 font-medium">Notas</th>
-                <th className="text-left p-3 font-medium">Creada</th>
-                <th className="text-right p-3 font-medium">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((o) => (
-                <tr key={o.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="p-3 font-mono text-xs">PO-{o.id.slice(0, 8)}</td>
-                  <td className="p-3">{o.supplier || '—'}</td>
-                  <td className="p-3">
-                    <Badge variant={(statusColors[o.status] || 'outline') as any} className="text-xs">{o.status}</Badge>
-                  </td>
-                  <td className="p-3 text-muted-foreground text-xs truncate max-w-[200px]">{o.notes || '—'}</td>
-                  <td className="p-3 text-xs">{new Date(o.created_at).toLocaleDateString('es-DO')}</td>
-                  <td className="p-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {o.status === 'pending' && (
-                        <>
-                          <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => updateStatus(o.id, 'completed')}>Completar</Button>
-                          <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => openEdit(o)}><Pencil className="w-3 h-3" /></Button>
-                        </>
-                      )}
-                      {(o.status === 'pending' || o.status === 'partial') && (
-                        <Button variant="ghost" size="icon" className="w-7 h-7 text-destructive" onClick={() => remove(o)}><Trash2 className="w-3 h-3" /></Button>
-                      )}
-                    </div>
-                  </td>
+          {loading ? <TableSkeleton rows={4} /> : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground text-xs">
+                  <th className="text-left p-3 font-medium">#</th>
+                  <th className="text-left p-3 font-medium">Proveedor</th>
+                  <th className="text-left p-3 font-medium">Estado</th>
+                  <th className="text-left p-3 font-medium">Notas</th>
+                  <th className="text-left p-3 font-medium">Creada</th>
+                  <th className="text-right p-3 font-medium">Acción</th>
                 </tr>
-              ))}
-              {orders.length === 0 && (
-                <tr><td colSpan={6} className="text-center p-8 text-muted-foreground text-sm">Sin órdenes de compra</td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {orders.map((o) => (
+                  <motion.tr key={o.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                    className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                    <td className="p-3 font-mono text-xs">PO-{o.id.slice(0, 8)}</td>
+                    <td className="p-3">{o.supplier || '—'}</td>
+                    <td className="p-3">
+                      <Badge variant={(statusColors[o.status] || 'outline') as any} className="text-xs">{o.status}</Badge>
+                    </td>
+                    <td className="p-3 text-muted-foreground text-xs truncate max-w-[200px]">{o.notes || '—'}</td>
+                    <td className="p-3 text-xs">{new Date(o.created_at).toLocaleDateString('es-DO')}</td>
+                    <td className="p-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {o.status === 'pending' && (
+                          <>
+                            <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => updateStatus(o.id, 'completed')}>Completar</Button>
+                            <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => openEdit(o)}><Pencil className="w-3 h-3" /></Button>
+                          </>
+                        )}
+                        {(o.status === 'pending' || o.status === 'partial') && (
+                          <Button variant="ghost" size="icon" className="w-7 h-7 text-destructive" onClick={() => remove(o)}><Trash2 className="w-3 h-3" /></Button>
+                        )}
+                      </div>
+                    </td>
+                  </motion.tr>
+                ))}
+                {orders.length === 0 && !loading && (
+                  <tr><td colSpan={6} className="text-center p-8 text-muted-foreground text-sm">
+                    <Truck className="w-8 h-8 mx-auto mb-2 text-muted-foreground/20" />
+                    Sin órdenes de compra
+                    <br /><Button variant="link" size="sm" className="mt-1" onClick={openCreate}>Crear primera orden</Button>
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          )}
         </CardContent>
       </Card>
 
@@ -315,7 +383,11 @@ export function InventoryPage() {
         </Button>
       </div>
 
-      {tab === 'items' ? <ItemsTab /> : <PurchaseOrdersTab />}
+      <AnimatePresence mode="wait">
+        <motion.div key={tab} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={{ duration: 0.15 }}>
+          {tab === 'items' ? <ItemsTab /> : <PurchaseOrdersTab />}
+        </motion.div>
+      </AnimatePresence>
     </motion.div>
   )
 }

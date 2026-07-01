@@ -5,12 +5,30 @@ import { InputField } from '@/components/ui/input-field'
 import { Modal } from '@/components/ui/modal'
 import { customers } from '@/services/api'
 import { motion } from 'framer-motion'
-import { Plus, RefreshCw, Pencil, Trash2, Loader2, Search, Phone, Mail } from 'lucide-react'
+import { Plus, RefreshCw, Pencil, Trash2, Loader2, Search, Phone, Mail, Users, AlertCircle } from 'lucide-react'
+import { CardSkeleton } from '@/components/ui/skeleton'
 import type { Customer } from '@/types'
+
+function TableSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="space-y-2 p-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex gap-4">
+          <CardSkeleton className="h-5 w-24" />
+          <CardSkeleton className="h-5 flex-1" />
+          <CardSkeleton className="h-5 flex-1" />
+          <CardSkeleton className="h-5 w-40" />
+          <CardSkeleton className="h-5 w-16" />
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export function CustomersPage() {
   const [list, setList] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [search, setSearch] = useState('')
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null)
   const [creating, setCreating] = useState(false)
@@ -18,7 +36,8 @@ export function CustomersPage() {
 
   const fetch = async () => {
     setLoading(true)
-    const data = await customers.list().catch(() => [])
+    setError(false)
+    const data = await customers.list().catch(() => { setError(true); return [] })
     setList(data)
     setLoading(false)
   }
@@ -56,7 +75,19 @@ export function CustomersPage() {
     await fetch()
   }
 
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+  if (error) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="text-center">
+          <AlertCircle className="w-10 h-10 text-destructive/50 mx-auto mb-3" />
+          <p className="text-sm font-medium mb-3">Error al cargar clientes</p>
+          <Button size="sm" variant="outline" onClick={fetch} className="gap-1">
+            <RefreshCw className="w-3 h-3" /> Reintentar
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 p-6 space-y-6 overflow-auto">
@@ -77,41 +108,48 @@ export function CustomersPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground text-xs">
-                <th className="text-left p-3 font-medium">RNC/Cédula</th>
-                <th className="text-left p-3 font-medium">Razón Social</th>
-                <th className="text-left p-3 font-medium">Nombre Comercial</th>
-                <th className="text-left p-3 font-medium">Contacto</th>
-                <th className="text-right p-3 font-medium">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="p-3 font-mono text-xs">{c.rnc}</td>
-                  <td className="p-3 font-medium">{c.business_name}</td>
-                  <td className="p-3 text-muted-foreground">{c.commercial_name || '—'}</td>
-                  <td className="p-3">
-                    <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-                      {c.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {c.phone}</span>}
-                      {c.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {c.email}</span>}
-                    </div>
-                  </td>
-                  <td className="p-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => openEdit(c)}><Pencil className="w-3 h-3" /></Button>
-                      <Button variant="ghost" size="icon" className="w-7 h-7 text-destructive" onClick={() => remove(c)}><Trash2 className="w-3 h-3" /></Button>
-                    </div>
-                  </td>
+          {loading ? <TableSkeleton /> : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground text-xs">
+                  <th className="text-left p-3 font-medium">RNC/Cédula</th>
+                  <th className="text-left p-3 font-medium">Razón Social</th>
+                  <th className="text-left p-3 font-medium">Nombre Comercial</th>
+                  <th className="text-left p-3 font-medium">Contacto</th>
+                  <th className="text-right p-3 font-medium">Acción</th>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={5} className="text-center p-8 text-muted-foreground text-sm">Sin clientes registrados</td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filtered.map((c, i) => (
+                  <motion.tr key={c.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.03 }}
+                    className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                    <td className="p-3 font-mono text-xs">{c.rnc}</td>
+                    <td className="p-3 font-medium">{c.business_name}</td>
+                    <td className="p-3 text-muted-foreground">{c.commercial_name || '—'}</td>
+                    <td className="p-3">
+                      <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                        {c.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {c.phone}</span>}
+                        {c.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {c.email}</span>}
+                      </div>
+                    </td>
+                    <td className="p-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => openEdit(c)}><Pencil className="w-3 h-3" /></Button>
+                        <Button variant="ghost" size="icon" className="w-7 h-7 text-destructive" onClick={() => remove(c)}><Trash2 className="w-3 h-3" /></Button>
+                      </div>
+                    </td>
+                  </motion.tr>
+                ))}
+                {filtered.length === 0 && !loading && (
+                  <tr><td colSpan={5} className="text-center p-8 text-muted-foreground text-sm">
+                    <Users className="w-8 h-8 mx-auto mb-2 text-muted-foreground/20" />
+                    Sin clientes registrados
+                    <br /><Button variant="link" size="sm" className="mt-1" onClick={openCreate}>Crear primer cliente</Button>
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          )}
         </CardContent>
       </Card>
 

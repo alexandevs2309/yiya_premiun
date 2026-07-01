@@ -5,8 +5,10 @@ type Theme = 'dark' | 'light'
 
 interface ThemeStore {
   theme: Theme
+  solMode: boolean
   setTheme: (t: Theme) => void
   toggleTheme: () => void
+  toggleSolMode: () => void
 }
 
 const getSystemTheme = (): Theme =>
@@ -16,8 +18,10 @@ export const useThemeStore = create<ThemeStore>()(
   persist(
     (set) => ({
       theme: getSystemTheme(),
+      solMode: false,
       setTheme: (theme) => set({ theme }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      toggleSolMode: () => set((s) => ({ solMode: !s.solMode })),
     }),
     { name: 'dyiya-theme' },
   ),
@@ -29,6 +33,10 @@ export function applyTheme(theme: Theme) {
   root.classList.add(theme)
 }
 
+export function applySolMode(enabled: boolean) {
+  document.documentElement.classList.toggle('modo-sol', enabled)
+}
+
 if (typeof window !== 'undefined') {
   const stored = localStorage.getItem('dyiya-theme')
   if (stored) {
@@ -36,6 +44,9 @@ if (typeof window !== 'undefined') {
       const parsed = JSON.parse(stored)
       if (parsed?.state?.theme) {
         applyTheme(parsed.state.theme)
+      }
+      if (parsed?.state?.solMode) {
+        applySolMode(parsed.state.solMode)
       }
     } catch {}
   } else {

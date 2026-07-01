@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { formatCurrency, cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 import { useNavigationStore } from '@/stores/navigation-store'
@@ -10,7 +10,8 @@ import { api, orders as ordersApi, tables, type ReceiptData } from '@/services/a
 import { Receipt } from '@/components/receipt'
 import { PinAuthModal } from '@/components/ui/pin-auth-modal'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, CheckCircle2, CreditCard, DollarSign, Smartphone, Loader2, Calculator, Printer, Users, Percent, UserCheck } from 'lucide-react'
+import { CardSkeleton } from '@/components/ui/skeleton'
+import { ArrowLeft, CheckCircle2, CreditCard, DollarSign, Smartphone, Loader2, Calculator, Printer, Users, Percent, UserCheck, AlertTriangle, RefreshCw } from 'lucide-react'
 import type { Order } from '@/types'
 
 type PaymentMethod = 'cash' | 'cardnet' | 'tpago' | 'mixed' | null
@@ -19,31 +20,38 @@ export function CashierPage() {
   const { activeOrderId, setActiveOrder, setActiveTable } = useAppStore()
   const setActiveModule = useNavigationStore((s) => s.setActiveModule)
   const [order, setOrder] = useState<Order | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [method, setMethod] = useState<PaymentMethod>(null)
   const [processing, setProcessing] = useState(false)
   const [done, setDone] = useState(false)
   const [cashReceived, setCashReceived] = useState('')
   const [createdPaymentId, setCreatedPaymentId] = useState<string | null>(null)
 
-  // Split bill states
   const [splitMode, setSplitMode] = useState<'none' | 'equal' | 'items'>('none')
   const [numSplits, setNumSplits] = useState(2)
-  const [selectedItems, setSelectedItems] = useState<Record<string, number>>({}) // item.id -> qty to pay
+  const [selectedItems, setSelectedItems] = useState<Record<string, number>>({})
 
-  // Discount states
   const [discountType, setDiscountType] = useState<'none' | 'employee' | 'custom'>('none')
   const [customDiscountPct, setCustomDiscountPct] = useState('0')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('')
   const [deductFromPayroll, setDeductFromPayroll] = useState(false)
   const [users, setUsers] = useState<any[]>([])
 
-  // PIN security states
   const [pinAuthOpen, setPinAuthOpen] = useState(false)
   const [pinAction, setPinAction] = useState<() => void>(() => {})
 
-  const fetchOrder = useCallback(() => {
-    if (activeOrderId) {
-      ordersApi.get(activeOrderId).then(setOrder).catch(() => {})
+  const fetchOrder = useCallback(async () => {
+    if (!activeOrderId) return
+    setLoading(true)
+    setError(false)
+    try {
+      const data = await ordersApi.get(activeOrderId)
+      setOrder(data)
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
     }
   }, [activeOrderId])
 
@@ -54,7 +62,6 @@ export function CashierPage() {
     }).catch(() => {})
   }, [fetchOrder])
 
-  // Sum of already paid item quantities
   const paidItemsQuantities: Record<string, number> = {}
   const paymentsList = (order as any)?.payments || []
   paymentsList.forEach((p: any) => {
@@ -67,13 +74,9 @@ export function CashierPage() {
     }
   })
 
-  // Calculate order total already paid
   const totalPaidAlready = paymentsList.reduce((sum: number, p: any) => sum + p.total, 0) || 0
-
-  // Base order subtotal
   const fullOrderSubtotal = order?.items.reduce((s, i) => s + i.price * i.quantity, 0) || 0
 
-  // Calculate base subtotal for current transaction
   let subtotal = 0
   if (splitMode === 'equal') {
     subtotal = fullOrderSubtotal / numSplits
@@ -91,7 +94,6 @@ export function CashierPage() {
     }
   }
 
-  // Calculate Discount Amount
   let discountAmt = 0
   if (discountType === 'employee') {
     discountAmt = subtotal * 0.50
@@ -111,8 +113,6 @@ export function CashierPage() {
 
   const handlePayClick = () => {
     if (!activeOrderId || !order) return
-    
-    // Require PIN for any discount or payroll deduction
     if (discountType !== 'none' || deductFromPayroll) {
       setPinAction(() => () => proceedWithPayment())
       setPinAuthOpen(true)
@@ -198,6 +198,44 @@ export function CashierPage() {
     )
   }
 
+  if (loading) {
+    return (
+      <div className="flex-1 p-6 max-w-5xl mx-auto space-y-6">
+        <div className="flex items-center gap-3">
+          <CardSkeleton className="h-8 w-24" />
+          <CardSkeleton className="h-8 w-56" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <CardSkeleton className="h-40" />
+            <CardSkeleton className="h-40" />
+            <CardSkeleton className="h-48" />
+          </div>
+          <div>
+            <CardSkeleton className="h-80" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="text-center max-w-sm">
+          <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-destructive/10 flex items-center justify-center">
+            <AlertTriangle className="w-7 h-7 text-destructive" />
+          </div>
+          <h2 className="text-lg font-semibold mb-1">Error al cargar orden</h2>
+          <p className="text-sm text-muted-foreground mb-4">No se pudo obtener la información de la orden</p>
+          <Button onClick={fetchOrder} className="gap-2" size="sm">
+            <RefreshCw className="w-4 h-4" /> Reintentar
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 p-6 space-y-6 max-w-5xl mx-auto font-sans">
       <div className="flex items-center justify-between border-b pb-4">
@@ -214,7 +252,6 @@ export function CashierPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {/* Configuración de División */}
           <Card>
             <CardContent className="p-4 space-y-4">
               <h3 className="font-semibold text-sm flex items-center gap-2">
@@ -232,53 +269,55 @@ export function CashierPage() {
                 </Button>
               </div>
 
-              {splitMode === 'equal' && (
-                <div className="flex items-center gap-3 p-3 bg-secondary/30 rounded-lg">
-                  <span className="text-sm">Número de partes:</span>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="icon" className="w-8 h-8" onClick={() => setNumSplits(Math.max(2, numSplits - 1))}>-</Button>
-                    <span className="font-bold font-number w-6 text-center">{numSplits}</span>
-                    <Button variant="outline" size="icon" className="w-8 h-8" onClick={() => setNumSplits(numSplits + 1)}>+</Button>
-                  </div>
-                  <span className="text-sm font-semibold ml-auto text-primary">
-                    Monto por persona: {formatCurrency((fullOrderSubtotal * 1.28) / numSplits)}
-                  </span>
-                </div>
-              )}
+              <AnimatePresence mode="wait">
+                {splitMode === 'equal' && (
+                  <motion.div key="equal" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                    className="flex items-center gap-3 p-3 bg-secondary/30 rounded-lg overflow-hidden">
+                    <span className="text-sm">Número de partes:</span>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="icon" className="w-8 h-8" onClick={() => setNumSplits(Math.max(2, numSplits - 1))}>-</Button>
+                      <span className="font-bold font-number w-6 text-center">{numSplits}</span>
+                      <Button variant="outline" size="icon" className="w-8 h-8" onClick={() => setNumSplits(numSplits + 1)}>+</Button>
+                    </div>
+                    <span className="text-sm font-semibold ml-auto text-primary">
+                      Monto por persona: {formatCurrency((fullOrderSubtotal * 1.28) / numSplits)}
+                    </span>
+                  </motion.div>
+                )}
 
-              {splitMode === 'items' && order && (
-                <div className="space-y-2 max-h-60 overflow-y-auto border rounded-lg p-3 bg-secondary/10">
-                  <span className="text-xs text-muted-foreground block mb-2">Selecciona la cantidad a pagar de cada producto en este abono:</span>
-                  {order.items.map((item) => {
-                    const maxQty = Math.max(0, item.quantity - (paidItemsQuantities[item.id] || 0))
-                    const selected = selectedItems[item.id] || 0
-                    
-                    return (
-                      <div key={item.id} className="flex items-center justify-between py-2 border-b last:border-0 text-sm">
-                        <div className="flex flex-col">
-                          <span className="font-medium">{item.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {formatCurrency(item.price)} c/u (Restan: {maxQty} de {item.quantity})
-                          </span>
-                        </div>
-                        {maxQty === 0 ? (
-                          <span className="text-xs font-semibold text-success">Totalmente pagado</span>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <Button variant="outline" size="icon" className="w-7 h-7" disabled={selected <= 0} onClick={() => handleItemQtyChange(item.id, selected - 1, maxQty)}>-</Button>
-                            <span className="font-bold w-6 text-center">{selected}</span>
-                            <Button variant="outline" size="icon" className="w-7 h-7" disabled={selected >= maxQty} onClick={() => handleItemQtyChange(item.id, selected + 1, maxQty)}>+</Button>
+                {splitMode === 'items' && order && (
+                  <motion.div key="items" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                    className="space-y-2 max-h-60 overflow-y-auto border rounded-lg p-3 bg-secondary/10 overflow-hidden">
+                    <span className="text-xs text-muted-foreground block mb-2">Selecciona la cantidad a pagar de cada producto en este abono:</span>
+                    {order.items.map((item) => {
+                      const maxQty = Math.max(0, item.quantity - (paidItemsQuantities[item.id] || 0))
+                      const selected = selectedItems[item.id] || 0
+                      return (
+                        <div key={item.id} className="flex items-center justify-between py-2 border-b last:border-0 text-sm">
+                          <div className="flex flex-col">
+                            <span className="font-medium">{item.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {formatCurrency(item.price)} c/u (Restan: {maxQty} de {item.quantity})
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+                          {maxQty === 0 ? (
+                            <span className="text-xs font-semibold text-success">Totalmente pagado</span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <Button variant="outline" size="icon" className="w-7 h-7" disabled={selected <= 0} onClick={() => handleItemQtyChange(item.id, selected - 1, maxQty)}>-</Button>
+                              <span className="font-bold w-6 text-center">{selected}</span>
+                              <Button variant="outline" size="icon" className="w-7 h-7" disabled={selected >= maxQty} onClick={() => handleItemQtyChange(item.id, selected + 1, maxQty)}>+</Button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </CardContent>
           </Card>
 
-          {/* Descuentos y Consumo Empleado */}
           <Card>
             <CardContent className="p-4 space-y-4">
               <h3 className="font-semibold text-sm flex items-center gap-2">
@@ -296,51 +335,54 @@ export function CashierPage() {
                 </Button>
               </div>
 
-              {discountType === 'employee' && (
-                <div className="space-y-3 p-3 bg-secondary/30 rounded-lg">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-muted-foreground">Seleccionar Empleado</label>
-                    <select
-                      value={selectedEmployeeId}
-                      onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                      className="w-full h-10 rounded-lg bg-background border border-border text-sm px-3 focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option value="">-- Seleccionar --</option>
-                      {users.map((u) => (
-                        <option key={u.id} value={u.id}>{u.username} ({u.role})</option>
-                      ))}
-                    </select>
-                  </div>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer mt-2 font-medium">
-                    <input
-                      type="checkbox"
-                      checked={deductFromPayroll}
-                      onChange={(e) => setDeductFromPayroll(e.target.checked)}
-                      className="w-4 h-4 rounded border-border text-primary focus:ring-ring"
-                    />
-                    Deducir de nómina del empleado
-                  </label>
-                </div>
-              )}
+              <AnimatePresence mode="wait">
+                {discountType === 'employee' && (
+                  <motion.div key="employee" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                    className="space-y-3 p-3 bg-secondary/30 rounded-lg overflow-hidden">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs text-muted-foreground">Seleccionar Empleado</label>
+                      <select
+                        value={selectedEmployeeId}
+                        onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                        className="w-full h-10 rounded-lg bg-background border border-border text-sm px-3 focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <option value="">-- Seleccionar --</option>
+                        {users.map((u) => (
+                          <option key={u.id} value={u.id}>{u.username} ({u.role})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer mt-2 font-medium">
+                      <input
+                        type="checkbox"
+                        checked={deductFromPayroll}
+                        onChange={(e) => setDeductFromPayroll(e.target.checked)}
+                        className="w-4 h-4 rounded border-border text-primary focus:ring-ring"
+                      />
+                      Deducir de nómina del empleado
+                    </label>
+                  </motion.div>
+                )}
 
-              {discountType === 'custom' && (
-                <div className="flex items-center gap-3 p-3 bg-secondary/30 rounded-lg">
-                  <span className="text-sm">Porcentaje de descuento:</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={customDiscountPct}
-                    onChange={(e) => setCustomDiscountPct(e.target.value)}
-                    className="w-20 h-10 rounded-lg bg-background border border-border text-center font-bold focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <span className="font-bold">%</span>
-                </div>
-              )}
+                {discountType === 'custom' && (
+                  <motion.div key="custom" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                    className="flex items-center gap-3 p-3 bg-secondary/30 rounded-lg overflow-hidden">
+                    <span className="text-sm">Porcentaje de descuento:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={customDiscountPct}
+                      onChange={(e) => setCustomDiscountPct(e.target.value)}
+                      className="w-20 h-10 rounded-lg bg-background border border-border text-center font-bold focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <span className="font-bold">%</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </CardContent>
           </Card>
 
-          {/* Método de pago */}
           {!deductFromPayroll && (
             <Card>
               <CardContent className="p-4 space-y-4">
@@ -355,7 +397,7 @@ export function CashierPage() {
                     const Icon = pm.icon
                     const isSelected = method === pm.id
                     return (
-                      <Card key={pm.id} className={cn('cursor-pointer transition-all hover:bg-muted/10', isSelected && 'ring-2 ring-primary bg-primary/5')}
+                      <Card key={pm.id} className={cn('cursor-pointer transition-all duration-150 hover:shadow-md hover:-translate-y-0.5', isSelected && 'ring-2 ring-primary bg-primary/5')}
                         onClick={() => setMethod(pm.id)}>
                         <CardContent className="p-3 text-center flex flex-col items-center">
                           <Icon className="w-6 h-6 mb-1 text-primary" />
@@ -367,47 +409,51 @@ export function CashierPage() {
                   })}
                 </div>
 
-                {method === 'cash' && (
-                  <div className="space-y-2">
-                    <label className="text-xs text-muted-foreground">Efectivo recibido</label>
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <Calculator className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <input type="number" inputMode="decimal" step="0.01" min="0"
-                          value={cashReceived}
-                          onChange={(e) => setCashReceived(e.target.value)}
-                          placeholder="0.00"
-                          className="w-full h-12 pl-10 pr-3 rounded-lg bg-secondary/50 border border-border text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-ring" />
+                <AnimatePresence>
+                  {method === 'cash' && (
+                    <motion.div key="cash-input" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                      className="space-y-2 overflow-hidden">
+                      <label className="text-xs text-muted-foreground">Efectivo recibido</label>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <Calculator className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <input type="number" inputMode="decimal" step="0.01" min="0"
+                            value={cashReceived}
+                            onChange={(e) => setCashReceived(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full h-12 pl-10 pr-3 rounded-lg bg-secondary/50 border border-border text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-ring" />
+                        </div>
+                        <Button variant="outline" size="sm" className="shrink-0"
+                          onClick={() => setCashReceived(total.toFixed(2))}>
+                          Exacto
+                        </Button>
                       </div>
-                      <Button variant="outline" size="sm" className="shrink-0"
-                        onClick={() => setCashReceived(total.toFixed(2))}>
-                        Exacto
-                      </Button>
-                    </div>
-                    {cashReceivedNum > 0 && (
-                      <div className="flex justify-between text-sm px-1">
-                        <span className="text-muted-foreground">Vuelto</span>
-                        <span className={cn('font-bold', change >= 0 ? 'text-success' : 'text-destructive')}>
-                          {formatCurrency(Math.abs(change))}
-                          {change < 0 && ' (falta)'}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      {cashReceivedNum > 0 && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                          className="flex justify-between text-sm px-1">
+                          <span className="text-muted-foreground">Vuelto</span>
+                          <span className={cn('font-bold', change >= 0 ? 'text-success' : 'text-destructive')}>
+                            {formatCurrency(Math.abs(change))}
+                            {change < 0 && ' (falta)'}
+                          </span>
+                        </motion.div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </CardContent>
             </Card>
           )}
 
           {deductFromPayroll && (
-            <div className="p-4 bg-primary/10 rounded-xl flex items-center gap-3 text-primary text-sm font-medium border border-primary/20">
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+              className="p-4 bg-primary/10 rounded-xl flex items-center gap-3 text-primary text-sm font-medium border border-primary/20">
               <UserCheck className="w-5 h-5 text-primary shrink-0" />
               <span>El consumo será cargado como una deducción de nómina para <strong>{users.find(u => u.id === selectedEmployeeId)?.username || 'el empleado seleccionado'}</strong>.</span>
-            </div>
+            </motion.div>
           )}
         </div>
 
-        {/* Resumen de cobro lateral */}
         <div className="space-y-4">
           <Card>
             <CardContent className="p-4 space-y-4">
@@ -428,10 +474,11 @@ export function CashierPage() {
                   <span className="font-number">{formatCurrency(subtotal)}</span>
                 </div>
                 {discountAmt > 0 && (
-                  <div className="flex justify-between text-destructive font-semibold">
+                  <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                    className="flex justify-between text-destructive font-semibold">
                     <span>Descuento Aplicado</span>
                     <span className="font-number">-{formatCurrency(discountAmt)}</span>
-                  </div>
+                  </motion.div>
                 )}
                 <div className="flex justify-between">
                   <span>Subtotal Neto</span>
@@ -446,7 +493,7 @@ export function CashierPage() {
                   <span className="font-number">{formatCurrency(propina)}</span>
                 </div>
               </div>
-              
+
               <Separator />
               <div className="flex justify-between font-bold text-xl font-heading text-primary">
                 <span>Total a Cobrar</span>
@@ -455,7 +502,7 @@ export function CashierPage() {
 
               <Button
                 size="xl"
-                className="w-full text-base gap-2 rounded-xl mt-2"
+                className="w-full text-base gap-2 rounded-xl mt-2 transition-all duration-150 hover:brightness-110"
                 onClick={handlePayClick}
                 disabled={processing || (!deductFromPayroll && (!method || !isValidCash)) || (discountType === 'employee' && !selectedEmployeeId)}
               >

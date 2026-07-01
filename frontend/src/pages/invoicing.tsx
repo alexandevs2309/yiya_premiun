@@ -7,6 +7,7 @@ import { formatCurrency } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import { FileText, RefreshCw, AlertCircle, CheckCircle2, Clock, XCircle, Send, Loader2 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
+import { CardSkeleton } from '@/components/ui/skeleton'
 
 interface ECFDoc {
   id: string
@@ -34,11 +35,31 @@ const statusConfig: Record<string, { label: string; icon: React.ElementType; var
   failed: { label: 'Falló', icon: AlertCircle, variant: 'destructive' },
 }
 
+function TableSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="space-y-2 p-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex gap-4">
+          <CardSkeleton className="h-5 w-24" />
+          <CardSkeleton className="h-5 w-12" />
+          <CardSkeleton className="h-5 w-28" />
+          <CardSkeleton className="h-5 w-16" />
+          <CardSkeleton className="h-5 w-20" />
+          <CardSkeleton className="h-5 w-12" />
+          <CardSkeleton className="h-5 flex-1" />
+          <CardSkeleton className="h-5 w-20" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function InvoicingPage() {
   const [documents, setDocuments] = useState<ECFDoc[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
-  
+
   const [annulModalOpen, setAnnulModalOpen] = useState(false)
   const [selectedDoc, setSelectedDoc] = useState<ECFDoc | null>(null)
   const [annulReason, setAnnulReason] = useState('1')
@@ -46,10 +67,13 @@ export function InvoicingPage() {
 
   const fetchDocs = async () => {
     setLoading(true)
+    setError(false)
     try {
       const data = await api<{ count: number; results: ECFDoc[] }>('/billing/ecf-documents/?page_size=50')
       setDocuments(data.results)
-    } catch {}
+    } catch {
+      setError(true)
+    }
     setLoading(false)
   }
 
@@ -107,19 +131,33 @@ export function InvoicingPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-        <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold">{stats.total}</p><p className="text-xs text-muted-foreground">Total</p></CardContent></Card>
-        <Card className="border-success/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-success">{stats.accepted}</p><p className="text-xs text-muted-foreground">Aceptados</p></CardContent></Card>
-        <Card className="border-warning/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-warning">{stats.pending}</p><p className="text-xs text-muted-foreground">Pendientes</p></CardContent></Card>
-        <Card className="border-primary/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-primary">{stats.processing}</p><p className="text-xs text-muted-foreground">Enviando</p></CardContent></Card>
-        <Card className="border-destructive/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-destructive">{stats.failed}</p><p className="text-xs text-muted-foreground">Fallidos</p></CardContent></Card>
-      </div>
+      {loading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+          {Array.from({ length: 5 }).map((_, i) => <CardSkeleton key={i} className="h-20" />)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+          <Card><CardContent className="p-4 text-center"><p className="text-2xl font-bold tabular-nums">{stats.total}</p><p className="text-xs text-muted-foreground">Total</p></CardContent></Card>
+          <Card className="border-success/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-success tabular-nums">{stats.accepted}</p><p className="text-xs text-muted-foreground">Aceptados</p></CardContent></Card>
+          <Card className="border-warning/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-warning tabular-nums">{stats.pending}</p><p className="text-xs text-muted-foreground">Pendientes</p></CardContent></Card>
+          <Card className="border-primary/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-primary tabular-nums">{stats.processing}</p><p className="text-xs text-muted-foreground">Enviando</p></CardContent></Card>
+          <Card className="border-destructive/20"><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-destructive tabular-nums">{stats.failed}</p><p className="text-xs text-muted-foreground">Fallidos</p></CardContent></Card>
+        </div>
+      )}
 
       <Card>
         <CardHeader><CardTitle className="text-sm">Documentos e-CF</CardTitle></CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+            <TableSkeleton />
+          ) : error ? (
+            <div className="flex flex-col items-center py-12 text-muted-foreground">
+              <AlertCircle className="w-10 h-10 text-destructive/50 mb-3" />
+              <p className="text-sm font-medium">Error al cargar documentos</p>
+              <Button size="sm" variant="outline" onClick={fetchDocs} className="gap-1 mt-3">
+                <RefreshCw className="w-3 h-3" /> Reintentar
+              </Button>
+            </div>
           ) : documents.length === 0 ? (
             <div className="text-center p-8 text-muted-foreground">
               <FileText className="w-12 h-12 mx-auto mb-2 opacity-30" />
@@ -142,21 +180,22 @@ export function InvoicingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {documents.map((doc) => {
+                  {documents.map((doc, i) => {
                     const cfg = statusConfig[doc.status] || statusConfig.pending
                     const Icon = cfg.icon
                     return (
-                      <tr key={doc.id} className="border-b last:border-0 hover:bg-muted/30">
+                      <motion.tr key={doc.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.02 }}
+                        className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                         <td className="p-3 font-mono text-xs">{doc.ncf || '—'}</td>
                         <td className="p-3">{doc.table_number}</td>
                         <td className="p-3 font-mono text-xs">{doc.rnc_cliente || '—'}</td>
-                        <td className="p-3 font-semibold">{formatCurrency(doc.total)}</td>
+                        <td className="p-3 font-semibold tabular-nums">{formatCurrency(doc.total)}</td>
                         <td className="p-3">
                           <Badge variant={cfg.variant} className="gap-1 text-xs">
                             <Icon className="w-3 h-3" /> {cfg.label}
                           </Badge>
                         </td>
-                        <td className="p-3 text-muted-foreground">{doc.attempts}</td>
+                        <td className="p-3 text-muted-foreground tabular-nums">{doc.attempts}</td>
                         <td className="p-3 text-xs text-destructive max-w-[200px] truncate">{doc.last_error || '—'}</td>
                         <td className="p-3 text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -179,7 +218,7 @@ export function InvoicingPage() {
                             )}
                           </div>
                         </td>
-                      </tr>
+                      </motion.tr>
                     )
                   })}
                 </tbody>
@@ -195,7 +234,7 @@ export function InvoicingPage() {
             Se generará una Nota de Crédito Electrónica (B04) asociada al NCF <span className="font-mono font-semibold">{selectedDoc?.ncf}</span>.
             Esta acción anulará la venta en los registros contables y liberará la mesa asociada.
           </p>
-          
+
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-muted-foreground font-sans">Motivo de Anulación</label>
             <select value={annulReason} onChange={(e) => setAnnulReason(e.target.value)}

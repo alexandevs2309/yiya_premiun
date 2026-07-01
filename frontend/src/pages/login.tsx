@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Shell, Eye, EyeOff, User, Lock, Fingerprint } from 'lucide-react'
+import { Shell, Eye, EyeOff, User, Lock, Fingerprint, Loader2 } from 'lucide-react'
 import { auth, setTokens } from '@/services/api'
 import { useAppStore } from '@/stores/app-store'
 import { useNavigationStore } from '@/stores/navigation-store'
@@ -40,7 +40,12 @@ export function LoginPage() {
       const tokens = await auth.login(username, password)
       await handleFullLogin(tokens.access, tokens.refresh)
     } catch (err: any) {
-      setError(err.message || 'Error al iniciar sesión')
+      const msg = err?.message || ''
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        setError('No se pudo conectar con el servidor')
+      } else {
+        setError(msg || 'Error al iniciar sesión')
+      }
     } finally { setLoading(false) }
   }
 
@@ -51,9 +56,18 @@ export function LoginPage() {
     setPin(next)
     setError('')
 
-    if (val && i < 5 && !next[i + 1]) {
-      const nextInput = document.getElementById(`pin-${i + 1}`)
-      nextInput?.focus()
+    if (val && i < 5) {
+      if (i === 5 || (next[i + 1] === '' && i < 5)) {
+        if (i < 5) {
+          const nextInput = document.getElementById(`pin-${i + 1}`)
+          nextInput?.focus()
+        }
+      }
+    }
+
+    const filled = next.join('').replace(/\D/g, '')
+    if (filled.length === 6) {
+      setTimeout(() => handlePinSubmit(), 50)
     }
   }
 
@@ -141,7 +155,7 @@ export function LoginPage() {
                     </motion.p>
                   )}
                   <Button type="submit" className="w-full shadow-lg shadow-primary/20" disabled={loading} size="lg">
-                    {loading ? 'Entrando...' : 'Entrar'}
+                    {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Entrando...</> : 'Entrar'}
                   </Button>
                   <Button type="button" variant="link" size="sm" onClick={switchMode} className="w-full text-xs">
                     <Fingerprint className="w-3 h-3" /> Acceso con PIN para meseros
@@ -171,7 +185,7 @@ export function LoginPage() {
                   <div className="flex gap-3 pt-1">
                     <Button variant="outline" className="flex-1" onClick={switchMode}>Cancelar</Button>
                     <Button className="flex-1" onClick={handlePinSubmit} disabled={loading || pinStr.length < 4}>
-                      {loading ? 'Verificando...' : 'Acceder'}
+                      {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verificando...</> : 'Acceder'}
                     </Button>
                   </div>
                 </motion.div>

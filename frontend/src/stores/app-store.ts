@@ -8,15 +8,12 @@ interface AppStore {
   activeTableId: number | null
   activeOrderId: string | null
   menuItems: MenuItem[]
-  solMode: boolean
-
   setUser: (user: User | null) => void
   setTables: (tables: Table[]) => void
   updateTable: (id: number, data: Partial<Table>) => void
   setActiveTable: (id: number | null) => void
   setActiveOrder: (id: string | null) => void
   setMenuItems: (items: MenuItem[]) => void
-  toggleSolMode: () => void
 }
 
 export const useAppStore = create<AppStore>()(
@@ -27,7 +24,6 @@ export const useAppStore = create<AppStore>()(
       activeTableId: null,
       activeOrderId: null,
       menuItems: [],
-      solMode: false,
 
       setUser: (user) => set({ user }),
       setTables: (tables) => set({ tables }),
@@ -38,7 +34,6 @@ export const useAppStore = create<AppStore>()(
       setActiveTable: (id) => set({ activeTableId: id }),
       setActiveOrder: (id) => set({ activeOrderId: id }),
       setMenuItems: (items) => set({ menuItems: items }),
-      toggleSolMode: () => set((s) => ({ solMode: !s.solMode })),
     }),
     { name: 'dyiya-app' },
   ),

@@ -5,7 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { motion, AnimatePresence } from 'framer-motion'
 import { formatCurrency } from '@/lib/utils'
 import { api } from '@/services/api'
-import { Shell, Plus, Minus, ShoppingCart, Send, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
+import { Shell, Plus, Minus, ShoppingCart, Send, CheckCircle2, AlertCircle, Loader2, UtensilsCrossed } from 'lucide-react'
+import { CardSkeleton } from '@/components/ui/skeleton'
 
 interface KioskItem {
   id: number
@@ -45,6 +46,7 @@ export function KioskPage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
+  const [orderNumber, setOrderNumber] = useState('')
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -88,7 +90,7 @@ export function KioskPage() {
     if (!token || cart.length === 0) return
     setSubmitting(true)
     try {
-      await api('/pos/kiosk/orders/', {
+      const res: any = await api('/pos/kiosk/orders/', {
         method: 'POST',
         body: JSON.stringify({
           table_token: token,
@@ -96,6 +98,7 @@ export function KioskPage() {
           guests: 1,
         }),
       })
+      setOrderNumber(res?.id?.slice(0, 8) || '')
       setDone(true)
     } catch (e: any) {
       setError(e.message || 'Error al enviar orden')
@@ -135,8 +138,9 @@ export function KioskPage() {
               <h2 className="text-xl font-bold mb-1">¡Orden enviada!</h2>
               <p className="text-sm text-muted-foreground mb-6">Tu orden está en preparación</p>
               <div className="space-y-1 text-xs text-muted-foreground">
-                <p>Mesa {table?.number}</p>
+                <p>Mesa {table?.number} · {table?.section}</p>
                 <p>{cart.length} item(s) · {formatCurrency(total)}</p>
+                {orderNumber && <p className="font-mono text-[10px] mt-1">Orden #{orderNumber}</p>}
               </div>
             </CardContent>
           </Card>
@@ -170,62 +174,79 @@ export function KioskPage() {
         <div className="flex gap-2 overflow-x-auto pb-4">
           {allCats.map((c) => (
             <Button key={c} variant={cat === c ? 'default' : 'outline'} size="sm"
-              onClick={() => setCat(c)} className="text-xs whitespace-nowrap shrink-0">{c}</Button>
+              onClick={() => setCat(cat === c ? '' : c)} className="text-xs whitespace-nowrap shrink-0 transition-all">{c}</Button>
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <AnimatePresence mode="popLayout">
-            {filteredCategories.flatMap((c) =>
-              c.items.map((item) => (
-                <motion.div key={item.id} layout initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-                  <Card className="cursor-pointer" onClick={() => addToCart(item)}>
-                    <CardContent className="p-3">
-                      <div className="h-16 rounded-lg bg-sky-100 flex items-center justify-center mb-2 text-xl">
-                        🍽️
-                      </div>
-                      <p className="text-sm font-medium truncate">{item.name}</p>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-sm font-bold text-sky-700">{formatCurrency(item.price)}</span>
-                        <Badge variant="secondary" className="text-[9px]">{item.preparation_time}min</Badge>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))
-            )}
-          </AnimatePresence>
-        </div>
+        <AnimatePresence mode="wait">
+          {filteredCategories.length === 0 ? (
+            <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="flex flex-col items-center py-16 text-muted-foreground">
+              <UtensilsCrossed className="w-10 h-10 text-muted-foreground/20 mb-3" />
+              <p className="text-sm font-medium">Menú no disponible</p>
+              <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={() => setCat('')}>
+                Ver todo
+              </Button>
+            </motion.div>
+          ) : (
+            <motion.div key="grid" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="grid grid-cols-2 gap-3">
+              {filteredCategories.flatMap((c) =>
+                c.items.map((item) => (
+                  <motion.div key={item.id} layout initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+                    <Card className="cursor-pointer transition-all duration-150 hover:shadow-lg hover:-translate-y-0.5" onClick={() => addToCart(item)}>
+                      <CardContent className="p-3">
+                        <div className="h-16 rounded-lg bg-gradient-to-br from-sky-100 to-sky-50 flex items-center justify-center mb-2">
+                          <UtensilsCrossed className="w-5 h-5 text-sky-400" />
+                        </div>
+                        <p className="text-sm font-medium truncate">{item.name}</p>
+                        <div className="flex items-center justify-between mt-1">
+                          <span className="text-sm font-bold text-sky-700 tabular-nums">{formatCurrency(item.price)}</span>
+                          <Badge variant="secondary" className="text-[9px]">{item.preparation_time}min</Badge>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-2xl p-4">
         <div className="max-w-4xl mx-auto">
           {cart.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground">Selecciona platos del menú</p>
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              <ShoppingCart className="w-4 h-4" />
+              <span>Selecciona platos del menú</span>
+            </div>
           ) : (
             <div className="space-y-3">
               <div className="space-y-1 max-h-32 overflow-auto">
                 {cart.map((item) => (
-                  <div key={item.menu_item} className="flex items-center justify-between text-sm">
+                  <motion.div key={item.menu_item} layout
+                    initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center justify-between text-sm">
                     <span className="truncate flex-1">{item.name}</span>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
                       <Button variant="outline" size="icon" className="w-6 h-6"
                         onClick={() => updateQty(item.menu_item, -1)}>
                         <Minus className="w-3 h-3" />
                       </Button>
-                      <span className="w-6 text-center font-medium">{item.quantity}</span>
+                      <span className="w-6 text-center font-medium tabular-nums">{item.quantity}</span>
                       <Button variant="outline" size="icon" className="w-6 h-6"
                         onClick={() => updateQty(item.menu_item, 1)}>
                         <Plus className="w-3 h-3" />
                       </Button>
-                      <span className="w-16 text-right font-medium">{formatCurrency(item.price * item.quantity)}</span>
+                      <span className="w-16 text-right font-medium tabular-nums">{formatCurrency(item.price * item.quantity)}</span>
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
               <div className="flex justify-between text-sm font-semibold border-t pt-2">
                 <span>Total</span>
-                <span>{formatCurrency(total)}</span>
+                <span className="tabular-nums">{formatCurrency(total)}</span>
               </div>
               <Button className="w-full gap-2" size="lg" onClick={handleSubmit} disabled={submitting}>
                 {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
